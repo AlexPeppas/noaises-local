@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>noaises</title>
+  <link rel="stylesheet" href="persona.css">
+</head>
+<body>
+  <div class="persona" id="persona">
+    <!-- Floating particles container (lightbulbs, books, etc.) -->
+    <div class="particles" id="particles"></div>
+
+    <!-- Blob body (unified head + torso) -->
+    <div class="blob">
+      <div class="face">
+        <div class="eye left-eye">
+          <div class="pupil"></div>
+        </div>
+        <div class="eye right-eye">
+          <div class="pupil"></div>
+        </div>
+        <div class="cheek cheek--left"></div>
+        <div class="cheek cheek--right"></div>
+        <div class="mouth"></div>
+      </div>
+      <!-- Thought bubble (thinking state) -->
+      <div class="thought-bubble" id="thoughtBubble">
+        <span class="dot dot-1"></span>
+        <span class="dot dot-2"></span>
+        <span class="dot dot-3"></span>
+      </div>
+    </div>
+    <!-- Little feet -->
+    <div class="feet">
+      <div class="foot"></div>
+      <div class="foot"></div>
+    </div>
+    <!-- Glow ring (listening state) -->
+    <div class="glow-ring" id="glowRing"></div>
+  </div>
+
+  <script src="persona.js"></script>
+</body>
+</html>
