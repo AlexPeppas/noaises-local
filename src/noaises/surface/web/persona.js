@@ -4,7 +4,7 @@
  * Called from Python via pywebview's evaluate_js bridge.
  */
 
-const STATES = ["idle", "listening", "thinking", "searching", "speaking"];
+const STATES = ["idle", "listening", "thinking", "searching", "speaking", "sleeping"];
 let currentState = "idle";
 let particleInterval = null;
 

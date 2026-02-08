@@ -440,3 +440,93 @@ html, body {
   0%, 100% { transform: rotate(0deg); }
   50%      { transform: rotate(-8deg) translateY(-2px); }
 }
+
+/* ── Sleeping State ──────────────────────────────────────── */
+
+/* Zzz bubble */
+.zzz-bubble {
+  position: absolute;
+  top: -15px;
+  right: -25px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.zzz {
+  font-family: system-ui, sans-serif;
+  font-weight: 800;
+  font-style: italic;
+  color: #a29bfe;
+  text-shadow: 0 0 8px rgba(162, 155, 254, 0.5);
+  opacity: 0;
+}
+
+@keyframes zzz-float {
+  0%   { opacity: 0; transform: translate(0, 0) scale(0.5); }
+  20%  { opacity: 1; transform: translate(4px, -6px) scale(1); }
+  80%  { opacity: 0.6; transform: translate(10px, -20px) scale(1.1); }
+  100% { opacity: 0; transform: translate(14px, -30px) scale(0.7); }
+}
+
+.persona--sleeping .zzz-bubble {
+  opacity: 1;
+}
+
+.persona--sleeping .zzz-1 {
+  font-size: 12px;
+  animation: zzz-float 2.4s 0s ease-in-out infinite;
+}
+
+.persona--sleeping .zzz-2 {
+  font-size: 16px;
+  animation: zzz-float 2.4s 0.6s ease-in-out infinite;
+}
+
+.persona--sleeping .zzz-3 {
+  font-size: 22px;
+  animation: zzz-float 2.4s 1.2s ease-in-out infinite;
+}
+
+/* Closed eyes — flat lines */
+.persona--sleeping .eye {
+  height: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.persona--sleeping .pupil {
+  opacity: 0;
+}
+
+/* Gentle breathing */
+@keyframes sleep-breathe {
+  0%, 100% { transform: translateX(-50%) scaleX(1) scaleY(1); }
+  50%      { transform: translateX(-50%) scaleX(1.02) scaleY(0.97); }
+}
+
+.persona--sleeping {
+  animation: sleep-breathe 3.5s ease-in-out infinite;
+}
+
+/* Blob dims and goes cooler */
+.persona--sleeping .blob {
+  background: linear-gradient(160deg, #5b4cc4, #8b7cf0, #5548a0);
+  box-shadow: 0 4px 15px rgba(91, 76, 196, 0.2);
+  animation: blob-morph 6s ease-in-out infinite;
+}
+
+/* Small sleepy smile */
+.persona--sleeping .mouth {
+  width: 14px;
+  height: 6px;
+  border-radius: 0 0 8px 8px;
+}
+
+/* Fade-out transition when entering sleep */
+.persona--sleeping .cheek { opacity: 0; }
+.persona--sleeping .glow-ring { opacity: 0; }
+.persona--sleeping .thought-bubble { opacity: 0; }

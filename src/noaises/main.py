@@ -1,9 +1,13 @@
 """Main entry point — orchestrates memory, personality, agent, voice, and surface.
 
 Threading model:
-- Main thread → pywebview (GUI requires it on Windows)
-- Background thread → asyncio event loop (agent, memory, voice)
+- Main thread -> pywebview (GUI requires it on Windows)
+- Background thread -> asyncio event loop (agent, memory, voice)
 If no surface is available, asyncio runs on the main thread as normal.
+
+Shutdown flow:
+- Ctrl+C in console -> async loop exits -> surface.destroy() kills webview -> process exits
+- User closes webview window -> on_closed fires -> os._exit() kills everything
 """
 
 from __future__ import annotations
@@ -75,7 +79,7 @@ async def async_main(surface=None):
 
     try:
         while True:
-            # ── Input ──
+            # -- Input --
             if surface:
                 surface.set_state("listening")
 
@@ -92,7 +96,7 @@ async def async_main(surface=None):
             # Store user message
             memory.append_short_term("user", user_input)
 
-            # ── Process ──
+            # -- Process --
             if surface:
                 surface.set_state("thinking")
 
@@ -102,7 +106,7 @@ async def async_main(surface=None):
 
             response = await query_agent(user_input, system_prompt)
 
-            # ── Output ──
+            # -- Output --
             memory.append_short_term("assistant", response)
             personality.record_interaction()
 
@@ -122,6 +126,11 @@ async def async_main(surface=None):
         print(f"\n{personality.name} is going to sleep. Goodbye!")
     finally:
         consolidation_task.cancel()
+        # Play sleep animation, then close
+        if surface:
+            surface.set_state("sleeping")
+            await asyncio.sleep(3)  # let the zzz animation play
+            surface.destroy()
 
 
 def _run_async_loop(surface):
@@ -141,7 +150,14 @@ def main():
         )
         loop_thread.start()
         print("[surface] Desktop persona launched.")
-        surface.run_blocking()  # blocks main thread
+
+        def _on_window_closed():
+            # Window closed by user — force exit the whole process.
+            # The daemon thread will die automatically.
+            print("\nnoaises is going to sleep. Goodbye!")
+            os._exit(0)
+
+        surface.run_blocking(on_closed=_on_window_closed)  # blocks main thread
     else:
         # No surface — asyncio gets the main thread
         asyncio.run(async_main())
