@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from noaises.agent.core import query_agent
 from noaises.memory.store import MemoryStore
 from noaises.personality.engine import PersonalityEngine
+from noaises.tools.screen_capture import CaptureScreenTool
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # noaises-local/
 DATA_DIR = BASE_DIR / "data"
@@ -67,6 +68,7 @@ async def async_main(surface=None):
     # Initialize core modules
     memory = MemoryStore(DATA_DIR)
     personality = PersonalityEngine(CONFIG_DIR / "personality.toml", DATA_DIR)
+    screen_capture = CaptureScreenTool(DATA_DIR / "screenshots")
 
     # Initialize optional voice
     voice = _init_voice()
@@ -96,6 +98,19 @@ async def async_main(surface=None):
             # Store user message
             memory.append_short_term("user", user_input)
 
+            # -- Screen capture (if user asks about their screen) --
+            screenshot_context = ""
+            if CaptureScreenTool.detect_intent(user_input):
+                if surface:
+                    surface.set_state("searching")
+                screenshot_path = await asyncio.to_thread(
+                    screen_capture.capture, surface
+                )
+                screenshot_context = (
+                    f"\n\n[A screenshot of the user's current screen has been saved. "
+                    f"Use the Read tool to view it at: {screenshot_path}]"
+                )
+
             # -- Process --
             if surface:
                 surface.set_state("thinking")
@@ -104,7 +119,7 @@ async def async_main(surface=None):
             short_term = memory.get_short_term_today_summary()
             system_prompt = personality.build_system_prompt(long_term, short_term)
 
-            response = await query_agent(user_input, system_prompt)
+            response = await query_agent(user_input + screenshot_context, system_prompt)
 
             # -- Output --
             memory.append_short_term("assistant", response)
