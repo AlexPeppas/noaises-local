@@ -83,9 +83,12 @@ class CaptureScreenTool:
         If *surface* is provided, briefly hides the persona window so it
         doesn't appear in the screenshot.
         """
-        # Hide persona window so it's not in the screenshot
+        # Hide persona window so it's not in the screenshot.
+        # Suppress the close handler — pywebview on Windows fires `closed`
+        # when hide() is called from a non-main thread.
         hidden = False
         if surface and surface._window:
+            surface._suppress_close = True
             surface._window.hide()
             hidden = True
             time.sleep(0.15)  # let the window fully disappear
@@ -101,6 +104,8 @@ class CaptureScreenTool:
             # Always restore the persona window
             if hidden:
                 surface._window.show()
+                time.sleep(0.15)  # let the window reappear
+                surface._suppress_close = False
 
         self._cleanup_old()
         return path

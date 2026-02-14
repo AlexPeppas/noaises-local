@@ -24,6 +24,7 @@ class DesktopSurface:
         self._state = "idle"
         self._window = None
         self._on_closed_callback = None
+        self._suppress_close = False  # True while programmatically hidden (e.g. screen capture)
 
     @property
     def state(self) -> str:
@@ -93,6 +94,8 @@ class DesktopSurface:
 
     def _on_window_closed(self):
         """Called when the user closes the window."""
+        if self._suppress_close:
+            return  # programmatic hide, not a real close
         if self._on_closed_callback:
             self._on_closed_callback()
 
@@ -107,20 +110,8 @@ class DesktopSurface:
         if self._window:
             self._window.evaluate_js(f"setPersonaState('{state}')")
 
-    def set_interrupt_controller(self, interrupt):
-        """Register the interrupt controller for click-to-interrupt."""
-        self._interrupt = interrupt
-
     # -- JS API bridge (called from JavaScript) --
 
     def get_state(self) -> str:
         """Called from JS to get current state."""
         return self._state
-
-    def on_persona_clicked(self):
-        """Called from JS when user clicks the persona during thinking/speaking."""
-        from noaises.interrupt.controller import InterruptSource
-
-        interrupt = getattr(self, "_interrupt", None)
-        if interrupt:
-            interrupt.fire(InterruptSource.SURFACE_CLICK)

@@ -78,9 +78,6 @@ async def async_main(surface=None):
     loop = asyncio.get_running_loop()
     interrupt = InterruptController(loop)
 
-    if surface:
-        surface.set_interrupt_controller(interrupt)
-
     # Initialize core modules
     memory = MemoryStore(MEMORY_DIR)
     personality = PersonalityEngine(CONFIG_DIR / "personality.toml", ARTIFACTS_DIR)

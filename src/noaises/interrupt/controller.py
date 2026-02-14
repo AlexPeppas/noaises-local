@@ -13,7 +13,6 @@ import threading
 
 class InterruptSource(enum.Enum):
     BARGE_IN = "barge_in"
-    SURFACE_CLICK = "surface_click"
 
 
 class InterruptController:
