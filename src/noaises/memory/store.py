@@ -26,6 +26,7 @@ class MemoryStore:
 
         # Create directories
         self.short_term_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize long-term store if missing
         if not self.long_term_path.exists():
