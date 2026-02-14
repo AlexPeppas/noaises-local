@@ -8,44 +8,31 @@
 </head>
 <body>
   <div class="persona" id="persona">
-    <!-- Floating particles container (lightbulbs, books, etc.) -->
+    <!-- Floating emoji particles (thinking/searching) -->
     <div class="particles" id="particles"></div>
 
-    <!-- Blob body (unified head + torso) -->
-    <div class="blob">
-      <div class="face">
-        <div class="eye left-eye">
-          <div class="pupil"></div>
-        </div>
-        <div class="eye right-eye">
-          <div class="pupil"></div>
-        </div>
-        <div class="cheek cheek--left"></div>
-        <div class="cheek cheek--right"></div>
-        <div class="mouth"></div>
-      </div>
-      <!-- Thought bubble (thinking state) -->
-      <div class="thought-bubble" id="thoughtBubble">
-        <span class="dot dot-1"></span>
-        <span class="dot dot-2"></span>
-        <span class="dot dot-3"></span>
-      </div>
-      <!-- Zzz bubble (sleeping state) -->
-      <div class="zzz-bubble" id="zzzBubble">
-        <span class="zzz zzz-1">z</span>
-        <span class="zzz zzz-2">z</span>
-        <span class="zzz zzz-3">Z</span>
-      </div>
+    <!-- Lottie blob animation -->
+    <div class="lottie-wrap" id="lottieWrap"></div>
+
+    <!-- Thought bubble dots (thinking state) -->
+    <div class="thought-bubble" id="thoughtBubble">
+      <span class="dot dot-1"></span>
+      <span class="dot dot-2"></span>
+      <span class="dot dot-3"></span>
     </div>
-    <!-- Little feet -->
-    <div class="feet">
-      <div class="foot"></div>
-      <div class="foot"></div>
+
+    <!-- Zzz bubble (sleeping state) -->
+    <div class="zzz-bubble" id="zzzBubble">
+      <span class="zzz zzz-1">z</span>
+      <span class="zzz zzz-2">z</span>
+      <span class="zzz zzz-3">Z</span>
     </div>
+
     <!-- Glow ring (listening state) -->
     <div class="glow-ring" id="glowRing"></div>
   </div>
 
+  <script src="lottie.min.js"></script>
   <script src="persona.js"></script>
 </body>
 </html>

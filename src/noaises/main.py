@@ -112,7 +112,7 @@ async def async_main(surface=None):
                     continue
 
             # Store user message
-            memory.append_short_term("user", user_input)
+            memory.append_daily_session("user", user_input)
 
             # -- Screen capture (if user asks about their screen) --
             screenshot_context = ""
@@ -143,7 +143,7 @@ async def async_main(surface=None):
 
             if was_interrupted:
                 if response:
-                    memory.append_short_term(
+                    memory.append_daily_session(
                         "assistant", response, tags=["interrupted", "partial"]
                     )
                 if surface:
@@ -151,7 +151,7 @@ async def async_main(surface=None):
                 continue
 
             # ── Speaking (interruptible via barge-in + click) ──
-            memory.append_short_term("assistant", response)
+            memory.append_daily_session("assistant", response)
             personality.record_interaction()
 
             if surface:
@@ -166,7 +166,7 @@ async def async_main(surface=None):
                 interrupt.disable()
 
                 if was_interrupted:
-                    memory.append_short_term(
+                    memory.append_daily_session(
                         "system",
                         "[User interrupted before full response was heard]",
                         tags=["interrupt_note"],
@@ -177,6 +177,11 @@ async def async_main(surface=None):
 
     except (KeyboardInterrupt, EOFError):
         print(f"\n{personality.name} is going to sleep. Goodbye!")
+    except Exception as e:
+        import traceback
+
+        print(f"\n[error] Unexpected error: {e}")
+        traceback.print_exc()
     finally:
         consolidation_task.cancel()
         # Play sleep animation, then close

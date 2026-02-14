@@ -1,12 +1,13 @@
 /**
- * Persona animation state machine with particle effects.
- * States: idle, listening, thinking, searching, speaking
+ * Persona animation state machine — Lottie blob + particle effects.
+ * States: idle, listening, thinking, searching, speaking, sleeping
  * Called from Python via pywebview's evaluate_js bridge.
  */
 
 const STATES = ["idle", "listening", "thinking", "searching", "speaking", "sleeping"];
 let currentState = "idle";
 let particleInterval = null;
+let lottieAnim = null;
 
 // Emoji pools per state
 const PARTICLE_SETS = {
@@ -14,9 +15,19 @@ const PARTICLE_SETS = {
   searching: ["\u{1F4D6}", "\u{1F4DA}", "\u{1F50D}", "\u{1F4C4}", "\u{1F4DD}", "\u{1F310}", "\u{1F516}", "\u{1F50E}"],
 };
 
+// Lottie speed per state (base animation is 5fps idle loop)
+const STATE_SPEED = {
+  idle: 1,
+  listening: 1.3,
+  thinking: 0.7,
+  searching: 1.5,
+  speaking: 1.2,
+  sleeping: 0.3,
+};
+
 /**
  * Set the persona's animation state.
- * @param {string} state - One of: idle, listening, thinking, searching, speaking
+ * @param {string} state - One of: idle, listening, thinking, searching, speaking, sleeping
  */
 function setPersonaState(state) {
   if (!STATES.includes(state)) return;
@@ -33,6 +44,17 @@ function setPersonaState(state) {
   // Apply new state
   el.classList.add(`persona--${state}`);
   currentState = state;
+
+  // Update Lottie playback speed
+  if (lottieAnim) {
+    lottieAnim.setSpeed(STATE_SPEED[state] || 1);
+
+    if (state === "sleeping") {
+      lottieAnim.setDirection(-1);
+    } else {
+      lottieAnim.setDirection(1);
+    }
+  }
 
   // Start particles for states that need them
   if (PARTICLE_SETS[state]) {
@@ -56,7 +78,7 @@ function spawnParticle(state) {
 
   // Random position around the blob
   const angle = Math.random() * Math.PI * 2;
-  const radius = 50 + Math.random() * 30;
+  const radius = 60 + Math.random() * 30;
   const startX = Math.cos(angle) * radius;
   const startY = Math.sin(angle) * radius - 20;
 
@@ -88,14 +110,21 @@ function stopParticles() {
     clearInterval(particleInterval);
     particleInterval = null;
   }
-  // Clear remaining particles (they'll fade out via animation)
   const container = document.getElementById("particles");
   if (container) {
     container.innerHTML = "";
   }
 }
 
-// Start in idle state
+// Initialize Lottie and start in idle state
 document.addEventListener("DOMContentLoaded", () => {
+  lottieAnim = lottie.loadAnimation({
+    container: document.getElementById("lottieWrap"),
+    renderer: "svg",
+    loop: true,
+    autoplay: true,
+    path: "blob-anim.json",
+  });
+
   setPersonaState("idle");
 });
