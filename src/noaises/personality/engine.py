@@ -14,6 +14,7 @@ You are {name}, an autonomous AI companion that lives locally on the host's mach
 - Verbosity: {verbosity}
 - Traits: {traits}
 {evolution_section}
+{memory_guidance}
 ## What You Know About the User
 {memory_context}
 
@@ -60,7 +61,10 @@ class PersonalityEngine:
             self._save_evolution()
 
     def build_system_prompt(
-        self, memory_context: str, short_term_context: str = ""
+        self,
+        memory_context: str,
+        short_term_context: str = "",
+        memory_guidance: str = "",
     ) -> str:
         """Build the full system prompt with personality + memory + evolution."""
         # Format traits
@@ -88,6 +92,7 @@ class PersonalityEngine:
             verbosity=self.verbosity,
             traits=trait_lines,
             evolution_section=evolution_section,
+            memory_guidance=memory_guidance,
             memory_context=memory_context
             or "Nothing yet — this is a new relationship.",
             short_term_context=short_term_context or "No recent conversation.",

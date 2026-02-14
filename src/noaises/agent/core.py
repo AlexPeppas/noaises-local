@@ -7,7 +7,7 @@ in our own memory module — the SDK doesn't hold state.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -32,18 +32,29 @@ ALLOWED_TOOLS = [
 ]
 
 
-def create_options(system_prompt: str) -> ClaudeAgentOptions:
-    """Create agent options with a dynamic system prompt."""
+def create_options(
+    system_prompt: str,
+    mcp_servers: dict[str, Any] | None = None,
+    extra_allowed_tools: list[str] | None = None,
+) -> ClaudeAgentOptions:
+    """Create agent options with a dynamic system prompt and optional MCP servers."""
+    allowed = ALLOWED_TOOLS + (extra_allowed_tools or [])
     return ClaudeAgentOptions(
         system_prompt=system_prompt,
-        allowed_tools=ALLOWED_TOOLS,
+        allowed_tools=allowed,
         permission_mode="acceptEdits",
+        mcp_servers=mcp_servers or {},
     )
 
 
-async def query_agent(user_text: str, system_prompt: str) -> str:
+async def query_agent(
+    user_text: str,
+    system_prompt: str,
+    mcp_servers: dict[str, Any] | None = None,
+    extra_allowed_tools: list[str] | None = None,
+) -> str:
     """Send a one-shot query to Claude. Returns the full text response."""
-    options = create_options(system_prompt)
+    options = create_options(system_prompt, mcp_servers, extra_allowed_tools)
     response_parts: list[str] = []
 
     async for message in query(prompt=user_text, options=options):
@@ -59,13 +70,15 @@ async def query_agent_interruptible(
     user_text: str,
     system_prompt: str,
     interrupt: InterruptController,
+    mcp_servers: dict[str, Any] | None = None,
+    extra_allowed_tools: list[str] | None = None,
 ) -> tuple[str, bool]:
     """Send a query to Claude with poll-based interruption.
 
     Checks interrupt.is_interrupted between each streaming message.
     Returns (response_text, was_interrupted).
     """
-    options = create_options(system_prompt)
+    options = create_options(system_prompt, mcp_servers, extra_allowed_tools)
     response_parts: list[str] = []
     interrupted = False
 

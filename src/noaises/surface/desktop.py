@@ -24,7 +24,9 @@ class DesktopSurface:
         self._state = "idle"
         self._window = None
         self._on_closed_callback = None
-        self._suppress_close = False  # True while programmatically hidden (e.g. screen capture)
+        self._suppress_close = (
+            False  # True while programmatically hidden (e.g. screen capture)
+        )
 
     @property
     def state(self) -> str:

@@ -21,7 +21,13 @@ from dotenv import load_dotenv
 
 from noaises.agent.core import query_agent_interruptible
 from noaises.interrupt.controller import InterruptController
+from noaises.memory.distiller import distill_memories, should_distill
 from noaises.memory.store import MemoryStore
+from noaises.memory.tools import (
+    MEMORY_META_PROMPT,
+    MEMORY_TOOL_NAMES,
+    create_memory_mcp_server,
+)
 from noaises.personality.engine import PersonalityEngine
 from noaises.sessions.engine import SessionEngine
 from noaises.tools.screen_capture import CaptureScreenTool
@@ -82,7 +88,8 @@ async def async_main(surface=None):
     interrupt = InterruptController(loop)
 
     # Initialize core modules
-    memory = MemoryStore(MEMORY_DIR)
+    memory_store = MemoryStore(MEMORY_DIR)
+    full_memory = memory_store.load_full_memory()
     session = SessionEngine(SESSIONS_DIR)
     personality = PersonalityEngine(CONFIG_DIR / "personality.toml", PERSONALITY_DIR)
     screen_capture = CaptureScreenTool(ARTIFACTS_DIR / "screenshots")
@@ -90,8 +97,7 @@ async def async_main(surface=None):
     # Initialize optional voice
     voice = _init_voice()
 
-    # Start consolidation background task
-    consolidation_task = asyncio.create_task(memory.consolidation_loop())
+    turn_count = 0
 
     mode = "voice" if voice else "text"
     print(
@@ -136,14 +142,30 @@ async def async_main(surface=None):
             if surface:
                 surface.set_state("thinking")
 
-            long_term = memory.get_long_term_summary()
-            short_term = session.get_today_summary()
-            system_prompt = personality.build_system_prompt(long_term, short_term)
+            turn_count += 1
+
+            # Rebuild MCP server each turn (binds to current memory state)
+            memory_server = create_memory_mcp_server(full_memory)
+            mcp_servers = {"memory": memory_server}
+
+            # Build system prompt with memory state + guidance
+            memory_state = memory_store.build_memory_state(full_memory)
+            session_summary = session.get_today_summary()
+            system_prompt = personality.build_system_prompt(
+                memory_state, session_summary, memory_guidance=MEMORY_META_PROMPT
+            )
 
             response, was_interrupted = await query_agent_interruptible(
-                user_input + screenshot_context, system_prompt, interrupt
+                user_input + screenshot_context,
+                system_prompt,
+                interrupt,
+                mcp_servers=mcp_servers,
+                extra_allowed_tools=MEMORY_TOOL_NAMES,
             )
             interrupt.disable()
+
+            # Save memory after each turn (agent may have called memory tools)
+            memory_store.save_all(full_memory)
 
             if was_interrupted:
                 if response:
@@ -176,6 +198,12 @@ async def async_main(surface=None):
             if surface:
                 surface.set_state("idle")
 
+            # Distill every N turns (fire-and-forget)
+            if should_distill(turn_count):
+                asyncio.create_task(
+                    distill_memories(full_memory, session, memory_store)
+                )
+
     except (KeyboardInterrupt, EOFError):
         print(f"\n{personality.name} is going to sleep. Goodbye!")
     except Exception as e:
@@ -184,7 +212,8 @@ async def async_main(surface=None):
         print(f"\n[error] Unexpected error: {e}")
         traceback.print_exc()
     finally:
-        consolidation_task.cancel()
+        # Save memory on exit
+        memory_store.save_all(full_memory)
         # Play sleep animation, then close
         if surface:
             surface.set_state("sleeping")
