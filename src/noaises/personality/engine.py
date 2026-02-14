@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 SYSTEM_PROMPT_TEMPLATE = """\
-You are {name}, a local AI companion.
+You are {name}, an autonomous AI companion that lives locally on the host's machine.
 
 ## Personality
 - Tone: {tone}
@@ -30,10 +30,10 @@ You are {name}, a local AI companion.
 class PersonalityEngine:
     """Loads personality config, builds system prompts, tracks evolution."""
 
-    def __init__(self, config_path: Path, artifacts_dir: Path):
+    def __init__(self, config_path: Path, personality_dir: Path):
         self.config_path = config_path
-        self.artifacts_dir = artifacts_dir
-        self.evolution_path = artifacts_dir / "personality_evolution.json"
+        self.personality_dir = personality_dir
+        self.evolution_path = personality_dir / "personality_evolution.json"
 
         # Load base personality from TOML
         with open(config_path, "rb") as f:
@@ -119,7 +119,7 @@ class PersonalityEngine:
         self._save_evolution()
 
     def _save_evolution(self):
-        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.personality_dir.mkdir(parents=True, exist_ok=True)
         self.evolution_path.write_text(
             json.dumps(self.evolution, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",

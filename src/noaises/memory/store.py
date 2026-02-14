@@ -1,8 +1,9 @@
 """Persistent memory store — file-based short-term + long-term with consolidation.
 
-Short-term: daily JSONL logs in data/short_term/
-Long-term: consolidated knowledge in data/long_term.json
-Consolidation: background task merges short-term → long-term via Claude.
+Short-term: daily JSONL working-context notes in memory/short_term/
+  What the user is focused on, working on, or planning right now.
+Long-term: consolidated knowledge in memory/long_term.json
+Consolidation: background task merges sessions + short-term → long-term via Claude.
 """
 
 from __future__ import annotations
@@ -15,18 +16,23 @@ from pathlib import Path
 
 
 class MemoryStore:
-    """Local file-based memory with short-term logs and long-term knowledge."""
+    """Local file-based memory with short-term logs and long-term knowledge.
 
-    def __init__(self, artifacts_dir: Path):
-        self.artifacts_dir = artifacts_dir
-        self.short_term_dir = artifacts_dir / "short_term"
-        self.long_term_path = artifacts_dir / "long_term.json"
-        self.sessions_dir = artifacts_dir / "sessions"
-        self.consolidation_state_path = artifacts_dir / "consolidation_state.json"
+    Owns only the ``memory/`` directory. Session logs live in a sibling
+    ``sessions/`` directory managed by ``SessionEngine``.
+    """
+
+    def __init__(self, memory_dir: Path):
+        self.memory_dir = memory_dir
+        self.short_term_dir = memory_dir / "short_term"
+        self.long_term_path = memory_dir / "long_term.json"
+        self.consolidation_state_path = memory_dir / "consolidation_state.json"
+
+        # Sessions dir is a sibling — consolidation reads from there
+        self.sessions_dir = memory_dir.parent / "sessions"
 
         # Create directories
         self.short_term_dir.mkdir(parents=True, exist_ok=True)
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize long-term store if missing
         if not self.long_term_path.exists():
@@ -41,24 +47,26 @@ class MemoryStore:
 
     # ── Short-term ────────────────────────────────────────────────
 
-    def append_daily_session(self, role: str, text: str, tags: list[str] | None = None):
-        """Append an exchange to today's short-term JSONL log."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = self.sessions_dir / f"{today}.jsonl"
+    def append_short_term(self, content: str, category: str = "general"):
+        """Append a working-context entry to today's short-term memory.
 
-        entry: dict = {
+        Short-term memory captures what the user is focused on, working on,
+        or planning — semantic context, not raw conversation.
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        path = self.short_term_dir / f"{today}.jsonl"
+
+        entry = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "role": role,
-            "text": text,
+            "content": content,
+            "category": category,
         }
-        if tags:
-            entry["tags"] = tags
 
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def get_session_today(self) -> list[dict]:
-        """Return today's short-term entries."""
+    def get_short_term_today(self) -> list[dict]:
+        """Return today's short-term memory entries."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = self.short_term_dir / f"{today}.jsonl"
         if not path.exists():
@@ -70,17 +78,16 @@ class MemoryStore:
                 entries.append(json.loads(line))
         return entries
 
-    def get_short_term_today_summary(self) -> str:
-        """Return a formatted summary of today's conversation for the system prompt."""
+    def get_short_term_summary(self, limit: int = 15) -> str:
+        """Return a formatted summary of today's short-term memory for the system prompt."""
         entries = self.get_short_term_today()
         if not entries:
             return ""
-        # Keep the last 20 entries to avoid bloating the prompt
-        recent = entries[-20:]
+        recent = entries[-limit:]
         lines = []
         for e in recent:
-            role = "User" if e["role"] == "user" else "You"
-            lines.append(f"- {role}: {e['text'][:200]}")
+            cat = e.get("category", "general")
+            lines.append(f"- [{cat}] {e['content'][:200]}")
         return "\n".join(lines)
 
     # ── Long-term ─────────────────────────────────────────────────
@@ -165,7 +172,7 @@ class MemoryStore:
     # ── Consolidation ─────────────────────────────────────────────
 
     async def consolidation_loop(self, interval_hours: float = 10.0):
-        """Background task: periodically consolidate short-term → long-term."""
+        """Background task: periodically consolidate session logs → long-term."""
         while True:
             await asyncio.sleep(interval_hours * 3600)
             try:
@@ -174,15 +181,28 @@ class MemoryStore:
                 print(f"[memory] Consolidation error: {e}")
 
     async def _consolidate(self):
-        """Read unconsolidated short-term entries, extract facts via Claude,
+        """Read unconsolidated session entries, extract facts via Claude,
         write to long-term, update consolidation state."""
         import anthropic
 
         state = json.loads(self.consolidation_state_path.read_text(encoding="utf-8"))
         last_ts = state.get("last_consolidated")
 
-        # Gather all short-term entries since last consolidation
-        all_entries: list[dict] = []
+        # Gather session entries (conversation logs) since last consolidation
+        session_entries: list[dict] = []
+        if self.sessions_dir.exists():
+            for jsonl_file in sorted(self.sessions_dir.glob("*.jsonl")):
+                for line in jsonl_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    entry = json.loads(line)
+                    if last_ts and entry["ts"] <= last_ts:
+                        continue
+                    session_entries.append(entry)
+
+        # Gather short-term memory entries (working context)
+        short_term_entries: list[dict] = []
         for jsonl_file in sorted(self.short_term_dir.glob("*.jsonl")):
             for line in jsonl_file.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -191,19 +211,32 @@ class MemoryStore:
                 entry = json.loads(line)
                 if last_ts and entry["ts"] <= last_ts:
                     continue
-                all_entries.append(entry)
+                short_term_entries.append(entry)
 
-        if not all_entries:
+        if not session_entries and not short_term_entries:
             return
 
-        # Build the conversation log for Claude
-        log_text = "\n".join(
-            f"[{e['ts']}] {e['role']}: {e['text']}" for e in all_entries
-        )
+        # Build the log for Claude — sessions as conversation, short-term as notes
+        log_parts = []
+        if session_entries:
+            sender_key = "sender" if "sender" in session_entries[0] else "role"
+            log_parts.append("--- Conversation Log ---")
+            for e in session_entries:
+                log_parts.append(f"[{e['ts']}] {e[sender_key]}: {e['text']}")
+        if short_term_entries:
+            log_parts.append("\n--- Working Context Notes ---")
+            for e in short_term_entries:
+                cat = e.get("category", "general")
+                log_parts.append(f"[{e['ts']}] [{cat}] {e['content']}")
+        log_text = "\n".join(log_parts)
+
+        all_entries = session_entries + short_term_entries
+        all_entries.sort(key=lambda e: e["ts"])
 
         prompt = (
             "You are a memory consolidation agent. Given a log of recent interactions "
-            "between a user and an AI companion, extract:\n"
+            "between a user and an AI companion, plus any working-context notes about "
+            "what the user is focused on, extract:\n"
             "- Facts about the user (name, job, preferences, habits)\n"
             "- User preferences (communication style, topics of interest, dislikes)\n"
             "- Key learnings (what worked well, what frustrated the user)\n"
@@ -212,8 +245,10 @@ class MemoryStore:
             "Categories: fact, preference, learning, personality_observation\n"
             "Confidence: 0.0 to 1.0\n"
             "Only extract genuinely useful information. Skip small talk and routine exchanges.\n"
+            "Working context notes are high-signal — they capture what the user is actively "
+            "working on or planning. Weigh them accordingly.\n"
             "Return ONLY the JSON array, no other text.\n\n"
-            f"--- Interaction Log ---\n{log_text}"
+            f"{log_text}"
         )
 
         client = anthropic.Anthropic()

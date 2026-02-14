@@ -23,6 +23,7 @@ from noaises.agent.core import query_agent_interruptible
 from noaises.interrupt.controller import InterruptController
 from noaises.memory.store import MemoryStore
 from noaises.personality.engine import PersonalityEngine
+from noaises.sessions.engine import SessionEngine
 from noaises.tools.screen_capture import CaptureScreenTool
 from .config import settings
 
@@ -33,8 +34,10 @@ SURFACE_DIR = Path(__file__).resolve().parent / "surface" / "web"
 
 # Home dir stuff
 HOME_DIR = settings.noaises_home_resolved  # ~/.noaises
-ARTIFACTS_DIR = HOME_DIR / "artifacts"
 MEMORY_DIR = HOME_DIR / "memory"
+SESSIONS_DIR = HOME_DIR / "sessions"
+PERSONALITY_DIR = HOME_DIR / "personality"
+ARTIFACTS_DIR = HOME_DIR / "artifacts"
 
 
 def _init_voice():
@@ -80,7 +83,8 @@ async def async_main(surface=None):
 
     # Initialize core modules
     memory = MemoryStore(MEMORY_DIR)
-    personality = PersonalityEngine(CONFIG_DIR / "personality.toml", ARTIFACTS_DIR)
+    session = SessionEngine(SESSIONS_DIR)
+    personality = PersonalityEngine(CONFIG_DIR / "personality.toml", PERSONALITY_DIR)
     screen_capture = CaptureScreenTool(ARTIFACTS_DIR / "screenshots")
 
     # Initialize optional voice
@@ -112,7 +116,7 @@ async def async_main(surface=None):
                     continue
 
             # Store user message
-            memory.append_daily_session("user", user_input)
+            session.append("user", user_input)
 
             # -- Screen capture (if user asks about their screen) --
             screenshot_context = ""
@@ -133,7 +137,7 @@ async def async_main(surface=None):
                 surface.set_state("thinking")
 
             long_term = memory.get_long_term_summary()
-            short_term = ""  # memory.get_short_term_today_summary() needs fix
+            short_term = session.get_today_summary()
             system_prompt = personality.build_system_prompt(long_term, short_term)
 
             response, was_interrupted = await query_agent_interruptible(
@@ -143,15 +147,13 @@ async def async_main(surface=None):
 
             if was_interrupted:
                 if response:
-                    memory.append_daily_session(
-                        "assistant", response, tags=["interrupted", "partial"]
-                    )
+                    session.append("assistant", response)
                 if surface:
                     surface.set_state("idle")
                 continue
 
             # ── Speaking (interruptible via barge-in + click) ──
-            memory.append_daily_session("assistant", response)
+            session.append("assistant", response)
             personality.record_interaction()
 
             if surface:
@@ -166,10 +168,9 @@ async def async_main(surface=None):
                 interrupt.disable()
 
                 if was_interrupted:
-                    memory.append_daily_session(
+                    session.append(
                         "system",
                         "[User interrupted before full response was heard]",
-                        tags=["interrupt_note"],
                     )
 
             if surface:
