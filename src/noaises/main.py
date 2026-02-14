@@ -161,7 +161,8 @@ async def async_main(surface=None):
                 interrupt,
                 mcp_servers=mcp_servers,
                 extra_allowed_tools=MEMORY_TOOL_NAMES,
-            )
+                surface= surface)
+            
             interrupt.disable()
 
             # Save memory after each turn (agent may have called memory tools)
