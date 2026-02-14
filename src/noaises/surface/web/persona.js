@@ -98,4 +98,11 @@ function stopParticles() {
 // Start in idle state
 document.addEventListener("DOMContentLoaded", () => {
   setPersonaState("idle");
+
+  // Click-to-interrupt: clicking persona during thinking/speaking fires interrupt
+  document.getElementById("persona").addEventListener("click", () => {
+    if (currentState === "thinking" || currentState === "speaking") {
+      window.pywebview.api.on_persona_clicked();
+    }
+  });
 });

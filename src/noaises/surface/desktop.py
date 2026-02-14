@@ -106,8 +106,20 @@ class DesktopSurface:
         if self._window:
             self._window.evaluate_js(f"setPersonaState('{state}')")
 
+    def set_interrupt_controller(self, interrupt):
+        """Register the interrupt controller for click-to-interrupt."""
+        self._interrupt = interrupt
+
     # -- JS API bridge (called from JavaScript) --
 
     def get_state(self) -> str:
         """Called from JS to get current state."""
         return self._state
+
+    def on_persona_clicked(self):
+        """Called from JS when user clicks the persona during thinking/speaking."""
+        from noaises.interrupt.controller import InterruptSource
+
+        interrupt = getattr(self, "_interrupt", None)
+        if interrupt:
+            interrupt.fire(InterruptSource.SURFACE_CLICK)

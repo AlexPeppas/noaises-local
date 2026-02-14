@@ -19,7 +19,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from noaises.agent.core import query_agent
+from noaises.agent.core import query_agent, query_agent_interruptible
+from noaises.interrupt.controller import InterruptController
 from noaises.memory.store import MemoryStore
 from noaises.personality.engine import PersonalityEngine
 from noaises.tools.screen_capture import CaptureScreenTool
@@ -65,6 +66,12 @@ def _init_surface():
 
 async def async_main(surface=None):
     """Run the companion loop. Called from the asyncio event loop."""
+    loop = asyncio.get_running_loop()
+    interrupt = InterruptController(loop)
+
+    if surface:
+        surface.set_interrupt_controller(interrupt)
+
     # Initialize core modules
     memory = MemoryStore(DATA_DIR)
     personality = PersonalityEngine(CONFIG_DIR / "personality.toml", DATA_DIR)
@@ -81,7 +88,8 @@ async def async_main(surface=None):
 
     try:
         while True:
-            # -- Input --
+            # ── Listening (not interruptible) ──
+            interrupt.disable()
             if surface:
                 surface.set_state("listening")
 
@@ -111,7 +119,8 @@ async def async_main(surface=None):
                     f"Use the Read tool to view it at: {screenshot_path}]"
                 )
 
-            # -- Process --
+            # ── Thinking (interruptible via poll) ──
+            interrupt.enable()
             if surface:
                 surface.set_state("thinking")
 
@@ -119,20 +128,43 @@ async def async_main(surface=None):
             short_term = memory.get_short_term_today_summary()
             system_prompt = personality.build_system_prompt(long_term, short_term)
 
-            response = await query_agent(user_input + screenshot_context, system_prompt)
+            response, was_interrupted = await query_agent_interruptible(
+                user_input + screenshot_context, system_prompt, interrupt
+            )
+            interrupt.disable()
 
-            # -- Output --
+            if was_interrupted:
+                if response:
+                    memory.append_short_term(
+                        "assistant",
+                        response,
+                        tags=["interrupted", "partial"]
+                    )
+                if surface:
+                    surface.set_state("idle")
+                continue
+
+            # ── Speaking (interruptible via barge-in + click) ──
             memory.append_short_term("assistant", response)
             personality.record_interaction()
 
             if surface:
                 surface.set_state("speaking")
 
+            print(f"\n{personality.name}: {response}\n")
+
             if voice:
-                print(f"\n{personality.name}: {response}\n")
-                await voice.speak(response)
-            else:
-                print(f"\n{personality.name}: {response}\n")
+                interrupt.enable()
+                await voice.speak_interruptible(response, interrupt)
+                was_interrupted = interrupt.is_interrupted
+                interrupt.disable()
+
+                if was_interrupted:
+                    memory.append_short_term(
+                        "system",
+                        "[User interrupted before full response was heard]",
+                        tags=["interrupt_note"],
+                    )
 
             if surface:
                 surface.set_state("idle")
