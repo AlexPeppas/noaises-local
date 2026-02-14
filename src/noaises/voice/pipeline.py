@@ -54,7 +54,9 @@ class VoicePipeline:
             print("[voice] No speech detected, retrying...")
             return ""
 
-        print(f"[voice] Captured {len(audio) / SAMPLE_RATE:.1f}s of audio, transcribing...")
+        print(
+            f"[voice] Captured {len(audio) / SAMPLE_RATE:.1f}s of audio, transcribing..."
+        )
 
         try:
             text = await self.stt.transcribe(audio, SAMPLE_RATE)
@@ -101,9 +103,7 @@ class VoicePipeline:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    async def _monitor_for_barge_in(
-        self, interrupt: InterruptController
-    ) -> None:
+    async def _monitor_for_barge_in(self, interrupt: InterruptController) -> None:
         """Listen for user speech during TTS playback (barge-in detection).
 
         Opens a secondary sounddevice InputStream and checks for loud
@@ -210,7 +210,9 @@ class VoicePipeline:
                 stream.close()
 
             if not has_speech:
-                print(f"[voice] No speech detected (peak RMS: {peak_rms:.4f}, threshold: {SILENCE_THRESHOLD})")
+                print(
+                    f"[voice] No speech detected (peak RMS: {peak_rms:.4f}, threshold: {SILENCE_THRESHOLD})"
+                )
 
             if chunks:
                 return np.concatenate(chunks)

@@ -17,11 +17,12 @@ from pathlib import Path
 class MemoryStore:
     """Local file-based memory with short-term logs and long-term knowledge."""
 
-    def __init__(self, data_dir: Path):
-        self.data_dir = data_dir
-        self.short_term_dir = data_dir / "short_term"
-        self.long_term_path = data_dir / "long_term.json"
-        self.consolidation_state_path = data_dir / "consolidation_state.json"
+    def __init__(self, artifacts_dir: Path):
+        self.artifacts_dir = artifacts_dir
+        self.short_term_dir = artifacts_dir / "short_term"
+        self.long_term_path = artifacts_dir / "long_term.json"
+        self.sessions_dir = artifacts_dir / "sessions"
+        self.consolidation_state_path = artifacts_dir / "consolidation_state.json"
 
         # Create directories
         self.short_term_dir.mkdir(parents=True, exist_ok=True)
@@ -39,12 +40,10 @@ class MemoryStore:
 
     # ── Short-term ────────────────────────────────────────────────
 
-    def append_short_term(
-        self, role: str, text: str, tags: list[str] | None = None
-    ):
+    def append_daily_session(self, role: str, text: str, tags: list[str] | None = None):
         """Append an exchange to today's short-term JSONL log."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        path = self.short_term_dir / f"{today}.jsonl"
+        path = self.sessions_dir / f"{today}.jsonl"
 
         entry: dict = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -57,7 +56,7 @@ class MemoryStore:
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
-    def get_short_term_today(self) -> list[dict]:
+    def get_session_today(self) -> list[dict]:
         """Return today's short-term entries."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         path = self.short_term_dir / f"{today}.jsonl"
@@ -178,9 +177,7 @@ class MemoryStore:
         write to long-term, update consolidation state."""
         import anthropic
 
-        state = json.loads(
-            self.consolidation_state_path.read_text(encoding="utf-8")
-        )
+        state = json.loads(self.consolidation_state_path.read_text(encoding="utf-8"))
         last_ts = state.get("last_consolidated")
 
         # Gather all short-term entries since last consolidation
@@ -210,7 +207,7 @@ class MemoryStore:
             "- User preferences (communication style, topics of interest, dislikes)\n"
             "- Key learnings (what worked well, what frustrated the user)\n"
             "- Personality observations (how should the companion adapt its personality)\n\n"
-            "Return as a JSON array of {\"category\", \"content\", \"confidence\"} objects.\n"
+            'Return as a JSON array of {"category", "content", "confidence"} objects.\n'
             "Categories: fact, preference, learning, personality_observation\n"
             "Confidence: 0.0 to 1.0\n"
             "Only extract genuinely useful information. Skip small talk and routine exchanges.\n"
@@ -236,12 +233,16 @@ class MemoryStore:
         try:
             extracted = json.loads(response_text)
         except json.JSONDecodeError:
-            print(f"[memory] Failed to parse consolidation response: {response_text[:200]}")
+            print(
+                f"[memory] Failed to parse consolidation response: {response_text[:200]}"
+            )
             return
 
         if extracted:
             self.add_long_term(extracted)
-            print(f"[memory] Consolidated {len(extracted)} entries to long-term memory.")
+            print(
+                f"[memory] Consolidated {len(extracted)} entries to long-term memory."
+            )
 
         # Update consolidation state
         self._write_json(

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:pypi.org)",
+      "Bash(uv:*)",
+      "WebFetch(domain:docs.astral.sh)",
+      "Bash(where:*)",
+      "Bash(py:*)",
+      "Bash(where.exe:*)",
+      "Bash(powershell.exe -Command \"& { uv sync }\")",
+      "Bash(cmd.exe /c \"cd C:\\\\Users\\\\apeppas\\\\Repos\\\\LLL\\\\noaises-local && uv sync 2>&1\")",
+      "Bash(powershell.exe -Command \"python --version 2>&1\")"
+    ]
+  }
+}

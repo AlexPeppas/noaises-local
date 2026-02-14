@@ -30,10 +30,10 @@ You are {name}, a local AI companion.
 class PersonalityEngine:
     """Loads personality config, builds system prompts, tracks evolution."""
 
-    def __init__(self, config_path: Path, data_dir: Path):
+    def __init__(self, config_path: Path, artifacts_dir: Path):
         self.config_path = config_path
-        self.data_dir = data_dir
-        self.evolution_path = data_dir / "personality_evolution.json"
+        self.artifacts_dir = artifacts_dir
+        self.evolution_path = artifacts_dir / "personality_evolution.json"
 
         # Load base personality from TOML
         with open(config_path, "rb") as f:
@@ -49,9 +49,7 @@ class PersonalityEngine:
 
         # Load or initialize evolution state
         if self.evolution_path.exists():
-            self.evolution = json.loads(
-                self.evolution_path.read_text(encoding="utf-8")
-            )
+            self.evolution = json.loads(self.evolution_path.read_text(encoding="utf-8"))
         else:
             self.evolution = {
                 "tone_adjustments": [],
@@ -66,9 +64,11 @@ class PersonalityEngine:
     ) -> str:
         """Build the full system prompt with personality + memory + evolution."""
         # Format traits
-        trait_lines = ", ".join(
-            f"{k}: {v}" for k, v in self.traits.items()
-        ) if self.traits else "none specified"
+        trait_lines = (
+            ", ".join(f"{k}: {v}" for k, v in self.traits.items())
+            if self.traits
+            else "none specified"
+        )
 
         # Format evolution adjustments
         evolution_section = ""
@@ -77,16 +77,10 @@ class PersonalityEngine:
         if adjustments or learned:
             parts = []
             if adjustments:
-                parts.append(
-                    "- Tone adjustments: " + "; ".join(adjustments)
-                )
+                parts.append("- Tone adjustments: " + "; ".join(adjustments))
             if learned:
-                parts.append(
-                    "- Learned preferences: " + "; ".join(learned)
-                )
-            evolution_section = (
-                "\n## Evolved Traits\n" + "\n".join(parts) + "\n"
-            )
+                parts.append("- Learned preferences: " + "; ".join(learned))
+            evolution_section = "\n## Evolved Traits\n" + "\n".join(parts) + "\n"
 
         return SYSTEM_PROMPT_TEMPLATE.format(
             name=self.name,
@@ -94,7 +88,8 @@ class PersonalityEngine:
             verbosity=self.verbosity,
             traits=trait_lines,
             evolution_section=evolution_section,
-            memory_context=memory_context or "Nothing yet — this is a new relationship.",
+            memory_context=memory_context
+            or "Nothing yet — this is a new relationship.",
             short_term_context=short_term_context or "No recent conversation.",
         )
 
@@ -124,7 +119,7 @@ class PersonalityEngine:
         self._save_evolution()
 
     def _save_evolution(self):
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.evolution_path.write_text(
             json.dumps(self.evolution, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",

@@ -75,6 +75,7 @@ class DesktopSurface:
         # which can reset it. By the time 'loaded' fires, init is complete.
         try:
             from System.Drawing import Color  # noqa: N813 — .NET naming
+
             self._window.gui.browser.webview.DefaultBackgroundColor = Color.Transparent
         except Exception:
             pass  # non-Windows or non-EdgeChromium — CSS fallback is enough

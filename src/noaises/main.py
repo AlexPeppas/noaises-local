@@ -19,16 +19,22 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from noaises.agent.core import query_agent, query_agent_interruptible
+from noaises.agent.core import query_agent_interruptible
 from noaises.interrupt.controller import InterruptController
 from noaises.memory.store import MemoryStore
 from noaises.personality.engine import PersonalityEngine
 from noaises.tools.screen_capture import CaptureScreenTool
+from .config import settings
 
+# Repo stuff
 BASE_DIR = Path(__file__).resolve().parent.parent.parent  # noaises-local/
-DATA_DIR = BASE_DIR / "data"
 CONFIG_DIR = BASE_DIR / "config"
 SURFACE_DIR = Path(__file__).resolve().parent / "surface" / "web"
+
+# Home dir stuff
+HOME_DIR = settings.noaises_home_resolved  # ~/.noaises
+ARTIFACTS_DIR = HOME_DIR / "artifacts"
+MEMORY_DIR = HOME_DIR / "memory"
 
 
 def _init_voice():
@@ -42,7 +48,9 @@ def _init_voice():
         from noaises.voice.pipeline import VoicePipeline
 
         if not speech_key or not speech_region:
-            print("[voice] AZURE_SPEECH_KEY / AZURE_SPEECH_REGION not set — TTS disabled.")
+            print(
+                "[voice] AZURE_SPEECH_KEY / AZURE_SPEECH_REGION not set — TTS disabled."
+            )
             return None
 
         stt = WhisperSTT(model_size="base")
@@ -58,6 +66,7 @@ def _init_surface():
     """Try to create the desktop surface. Returns DesktopSurface or None."""
     try:
         from noaises.surface.desktop import DesktopSurface
+
         return DesktopSurface(SURFACE_DIR)
     except ImportError as e:
         print(f"[surface] pywebview not installed ({e}) — headless mode.")
@@ -73,9 +82,9 @@ async def async_main(surface=None):
         surface.set_interrupt_controller(interrupt)
 
     # Initialize core modules
-    memory = MemoryStore(DATA_DIR)
-    personality = PersonalityEngine(CONFIG_DIR / "personality.toml", DATA_DIR)
-    screen_capture = CaptureScreenTool(DATA_DIR / "screenshots")
+    memory = MemoryStore(MEMORY_DIR)
+    personality = PersonalityEngine(CONFIG_DIR / "personality.toml", ARTIFACTS_DIR)
+    screen_capture = CaptureScreenTool(ARTIFACTS_DIR / "screenshots")
 
     # Initialize optional voice
     voice = _init_voice()
@@ -84,7 +93,9 @@ async def async_main(surface=None):
     consolidation_task = asyncio.create_task(memory.consolidation_loop())
 
     mode = "voice" if voice else "text"
-    print(f"{personality.name} is awake ({mode} mode). {'Speak' if voice else 'Type a message'} (Ctrl+C to quit).\n")
+    print(
+        f"{personality.name} is awake ({mode} mode). {'Speak' if voice else 'Type a message'} (Ctrl+C to quit).\n"
+    )
 
     try:
         while True:
@@ -125,7 +136,7 @@ async def async_main(surface=None):
                 surface.set_state("thinking")
 
             long_term = memory.get_long_term_summary()
-            short_term = memory.get_short_term_today_summary()
+            short_term = ""  # memory.get_short_term_today_summary() needs fix
             system_prompt = personality.build_system_prompt(long_term, short_term)
 
             response, was_interrupted = await query_agent_interruptible(
@@ -136,9 +147,7 @@ async def async_main(surface=None):
             if was_interrupted:
                 if response:
                     memory.append_short_term(
-                        "assistant",
-                        response,
-                        tags=["interrupted", "partial"]
+                        "assistant", response, tags=["interrupted", "partial"]
                     )
                 if surface:
                     surface.set_state("idle")

@@ -97,8 +97,8 @@ User speaks → [Voice In: Whisper STT] → text
 ### Phase 1 — Text REPL (current)
 - [x] Project scaffold with uv
 - [x] Agent core with ClaudeSDKClient REPL loop
-- [ ] Personality engine loading `config/personality.toml` into system prompt
-- [ ] Memory store persisting conversation history locally
+- [x] Personality engine loading `config/personality.toml` into system prompt
+- [x] Memory store persisting conversation history locally
 - [ ] Hook into agent for memory-augmented context
 
 ### Phase 2 — Voice
