@@ -2,139 +2,143 @@
 
 ## What This Is
 
-Local-first, voice-first AI companion powered by the Claude Agent SDK. A desktop persona that listens, speaks, remembers, and evolves. See [`../Moonshot.md`](../Moonshot.md) for the full vision.
+A local-first, voice-first AI companion powered by the Claude Agent SDK. An animated desktop persona that listens, speaks, remembers, and evolves. See [`README.md`](README.md) for full architecture docs.
+
+**Guiding principles**: All interaction is voice-first — you speak, it listens, it responds aloud. No keyboard required for day-to-day use. It has persistent personality that evolves across sessions, remembers preferences, recalls past conversations. Everything runs locally — conversations, memories, personality state stay on your machine. The only external call is to the LLM API for inference.
 
 ## Tech Stack
 
-- **Python 3.10+**, managed with **uv** (`uv sync`, `uv run`)
-- **Claude Agent SDK** (`claude-agent-sdk`) — agent loop, tool use, MCP, streaming, hooks
+- **Python 3.11+**, managed with **uv** (`uv sync`, `uv run`)
+- **Claude Agent SDK** (`claude-agent-sdk`) — agent loop, tool use, MCP, streaming
 - **Hatchling** build backend, src-layout (`src/noaises/`)
 - Entry point: `uv run noaises` (calls `noaises.main:main`)
 
 ## Project Structure
 
 ```
-noaises-local/
-├── src/noaises/
-│   ├── __init__.py              # Package version
-│   ├── main.py                  # Entry point — asyncio bootstrap
-│   │
-│   ├── agent/                   # Agent core
-│   │   └── core.py              # ClaudeSDKClient wrapper, agent loop
-│   │
-│   ├── voice/                   # Voice pipeline
-│   │   └── pipeline.py          # STT (Whisper) + TTS (system/ElevenLabs)
-│   │
-│   ├── memory/                  # Persistent memory
-│   │   └── store.py             # Conversation history, preferences, context
-│   │
-│   ├── personality/             # Personality engine
-│   │   └── engine.py            # Trait loading, system prompt injection, evolution
-│   │
-│   └── surface/                 # Desktop UI
-│       └── desktop.py           # Always-on-top animated persona window
+src/noaises/
+├── main.py                      # Orchestrator — turn loop, wiring, shutdown
+├── config.py                    # Pydantic settings (streaming, distill, paths)
+├── logger.py                    # Structured JSON logging
 │
-├── config/
-│   └── personality.toml         # Personality configuration (name, tone, verbosity)
+├── agent/core.py                # ClaudeSDKClient wrapper — streaming + batch
 │
-├── pyproject.toml               # Dependencies, build config, entry point
-├── .python-version              # 3.10 (pinned by uv)
-└── CLAUDE.md                    # This file
+├── voice/
+│   ├── stt.py                   # WhisperSTT (faster-whisper, local)
+│   ├── tts.py                   # AzureTTS + StreamingTTSSession
+│   └── pipeline.py              # VAD, barge-in, sentence buffer, speak_streaming
+│
+├── memory/
+│   ├── model.py                 # Pydantic models (ShortTerm, LongTerm, FullMemoryContext)
+│   ├── store.py                 # Markdown persistence (short_term/*.md, long_term.md)
+│   ├── distiller.py             # Background consolidation via Haiku
+│   └── tools.py                 # MCP server (memory_store, memory_remove)
+│
+├── personality/engine.py        # TOML config + evolution + system prompt building
+├── sessions/engine.py           # Daily JSONL conversation logs
+├── interrupt/controller.py      # Thread-safe interrupt signaling
+│
+├── surface/
+│   ├── desktop.py               # pywebview wrapper (frameless, transparent, on-top)
+│   └── web/                     # HTML/CSS/JS persona animations (6 states)
+│
+└── tools/screen_capture.py      # Screen capture + intent detection
 ```
 
 ## Module Responsibilities
 
 ### `agent/core.py` — Agent Core
-The beating heart. Wraps `ClaudeSDKClient` from the Claude Agent SDK into a REPL loop. Handles:
-- Agent configuration (`ClaudeAgentOptions` — tools, permissions, model)
-- Multi-turn conversation via `client.query()` + `client.receive_response()`
-- Streaming response processing (`AssistantMessage` → `TextBlock`)
+Wraps `ClaudeSDKClient` with two query modes controlled by `settings.enable_streaming`:
+- **`query_agent_interruptible()`** — Batch: full response at once, poll-based interrupt
+- **`query_stream_agent_interruptible()`** — Streaming: async generator yielding `AgentStreamEvent` per token (`thinking_delta`, `text_delta`, `tool_use`, `tool_result`, `done`)
 
-Current tools: Task, Bash, Glob, Grep, Read, Edit, Write, WebFetch, WebSearch. Permission mode: `acceptEdits`.
+Uses `include_partial_messages=True` on the SDK to receive `StreamEvent` with raw Anthropic API events (`content_block_delta` → `text_delta` / `thinking_delta`).
 
-### `voice/pipeline.py` — Voice Pipeline (stub)
-Wraps around the agent core — the SDK has no native voice support. Will handle:
-- **STT**: OpenAI Whisper (local model or cloud API) — mic capture → text
-- **TTS**: System TTS (`pyttsx3`) for low-latency, ElevenLabs for quality — text → speaker
-- Audio device management, wake word detection
+Tools: Task, Bash, Glob, Grep, Read, Edit, Write, WebFetch, WebSearch + MCP memory tools. Model: `claude-opus-4-5`, fallback `claude-sonnet-4-5`. Permission mode: `acceptEdits`.
 
-### `memory/store.py` — Persistent Memory (stub)
-Local storage for everything that makes the companion *remember*. Will handle:
-- Conversation history (session + cross-session)
-- User preferences and facts learned over time
-- Context retrieval for agent system prompt augmentation
-- Storage backend: file-based or SQLite (TBD)
+### `voice/` — Voice Pipeline
+- **`stt.py`**: Local Whisper via faster-whisper. Mic → audio → text.
+- **`tts.py`**: Azure Speech SDK with V2 WebSocket endpoint. `AzureTTS` for batch, `StreamingTTSSession` for text-stream synthesis (`SpeechSynthesisRequest(TextStream)` — write sentences incrementally, audio plays before all text arrives).
+- **`pipeline.py`**: `VoicePipeline` — audio capture with energy-based VAD, `speak_interruptible()` for batch TTS, `speak_streaming()` for streaming TTS. `SentenceBuffer` accumulates tokens and flushes at `.!?:;\n` boundaries. Barge-in detection via secondary mic stream (5x silence threshold, 3 consecutive chunks).
 
-### `personality/engine.py` — Personality Engine (stub)
-Makes LLL feel like a companion, not a tool. Will handle:
-- Loading personality config from `config/personality.toml`
-- Building and injecting personality traits into the system prompt
-- Personality evolution — adapting tone/style based on interaction patterns
-- Mood/energy state that shifts throughout the day
+### `memory/` — Persistent Memory
+- **`model.py`**: Pydantic models — `ShortTermMemory`, `LongTermMemory`, `FullMemoryContext`
+- **`store.py`**: Markdown files — `long_term.md` + `short_term/YYYY-MM-DD.md`. `## Category` headers, `- item` bullets. Categories are dynamic.
+- **`distiller.py`**: Every N turns, sends session history to Haiku → extracts `{tier, category, content, action}` → writes to memory. Fire-and-forget.
+- **`tools.py`**: MCP server exposing `memory_store` / `memory_remove`. Agent actively manages its own memory.
 
-### `surface/desktop.py` — Desktop Surface (stub)
-The visual presence. Will handle:
-- Transparent always-on-top window (framework TBD: tkinter, PyQt, or Tauri)
-- Animated persona with states: idle, listening, thinking, speaking
-- Click/hover interactions, minimize/restore
-- Visual feedback tied to voice pipeline state
+### `personality/engine.py` — Personality Engine
+Loads `config/personality.toml` (name, tone, verbosity, traits). Builds system prompt per turn: base identity + evolution traits + memory context + session summary + MCP guidance. Tracks evolution in `personality_evolution.json`.
+
+### `sessions/engine.py` — Session Logging
+Append-only JSONL per day. Entries: `{sender, text, ts}`. Feeds distiller and system prompt summary.
+
+### `surface/` — Desktop Surface
+pywebview + WebView2: 250x320px frameless, transparent, always-on-top. Six states: idle, listening, thinking, searching, speaking, sleeping. JS state machine with Lottie blob + particle effects.
+
+### `interrupt/controller.py` — Interrupt Controller
+Thread-safe bridge: `threading.Event` (for blocking code poll) + `asyncio.Event` (for coroutine await). `fire()` callable from any thread.
 
 ## Architecture Flow
 
 ```
-User speaks → [Voice In: Whisper STT] → text
-  → [Personality Engine: augment prompt] → enriched prompt
-  → [Agent Core: ClaudeSDKClient.query()] → Claude API
-  → [Agent Core: receive_response()] → response text
-  → [Personality Engine: style response] → styled text
-  → [Voice Out: TTS] → audio → User hears
-  → [Memory Store: persist exchange]
-  → [Surface: update animation state]
+Streaming path (enable_streaming=True):
+  User input → system prompt build → query_stream_agent_interruptible()
+    → thinking_delta tokens → console [thinking] (not spoken)
+    → text_delta tokens → console typewriter + SentenceBuffer → StreamingTTSSession
+    → tool_use/tool_result → surface state updates
+    → done → session log + memory save + distill
+
+Batch path (enable_streaming=False):
+  User input → system prompt build → query_agent_interruptible()
+    → full response → print → speak_interruptible() → session log + memory save
 ```
 
-## Implementation Scope
+## Threading Model
 
-### Phase 1 — Text REPL (current)
-- [x] Project scaffold with uv
-- [x] Agent core with ClaudeSDKClient REPL loop
-- [x] Personality engine loading `config/personality.toml` into system prompt
-- [x] Memory store persisting conversation history locally
-- [ ] Hook into agent for memory-augmented context
+- **Main thread**: pywebview event loop (Windows GUI requirement)
+- **Background thread**: asyncio loop (agent, voice, memory, distillation)
+- **to_thread**: sounddevice capture, TTS blocking calls
+- **InterruptController**: bridges threads via dual Event pattern
 
-### Phase 2 — Voice
-- [ ] Whisper STT integration (local model)
-- [ ] System TTS (`pyttsx3`) integration
-- [ ] Voice pipeline wiring: mic → STT → agent → TTS → speaker
-- [ ] ElevenLabs TTS as optional high-quality backend
+## Data Layout (`~/.noaises/`)
 
-### Phase 3 — Desktop Surface
-- [ ] Always-on-top transparent window
-- [ ] Animated persona (idle, listening, thinking, speaking)
-- [ ] Surface ↔ voice pipeline state sync
+```
+memory/long_term.md              # Permanent facts
+memory/short_term/YYYY-MM-DD.md  # Daily observations
+sessions/YYYY-MM-DD.jsonl        # Conversation logs
+personality/personality_evolution.json
+artifacts/screenshots/            # Auto-cleaned after 1h
+```
 
-### Phase 4 — Intelligence
-- [ ] Personality evolution over time
-- [ ] Proactive interactions (time-based, context-based)
-- [ ] Custom MCP tools for system integration
-- [ ] Wake word detection for hands-free activation
+## Configuration (`config.py`)
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `NOAISES_HOME` | `~/.noaises` | Data directory |
+| `enable_streaming` | `True` | Token-by-token output + streaming TTS |
+| `memory_distill_enabled` | `True` | Background memory consolidation |
+| `memory_distill_interval` | `5` | Distill every N turns |
+| `memory_distill_model` | `claude-haiku-4-5-20251001` | Distillation model |
+
+## Environment
+
+- `ANTHROPIC_API_KEY` — Required. Claude API key.
+- `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` — Required for voice mode. Azure TTS.
+- `AZURE_SPEECH_VOICE` — Optional. Default `en-US-AvaMultilingualNeural`.
 
 ## Development Commands
 
 ```bash
 uv sync              # Install/update dependencies
-uv run noaises       # Run the companion (text REPL mode)
+uv run noaises       # Run the companion
 uv add <package>     # Add a dependency
-uv run python -m pytest  # Run tests (when we have them)
 ```
-
-## Environment
-
-- `ANTHROPIC_API_KEY` — Required. The Claude API key for inference.
-- Future: `ELEVENLABS_API_KEY` for high-quality TTS.
 
 ## Conventions
 
-- **Async-first**: The agent loop is async. New modules that interact with the agent should be async.
-- **No over-engineering**: Build what's needed now. Stubs exist for future modules — fill them in when the time comes.
+- **Async-first**: Agent loop is async. New modules interacting with the agent must be async.
+- **No over-engineering**: Build what's needed now. Don't abstract for hypothetical futures.
 - **Local data only**: No external storage. Everything persists on the user's machine.
-- **src-layout**: All source lives under `src/noaises/`. Imports use `from noaises.x.y import z`.
+- **src-layout**: All source under `src/noaises/`. Imports: `from noaises.x.y import z`.
+- **Graceful degradation**: No voice keys → text mode. No pywebview → headless. Every layer optional except agent core.
