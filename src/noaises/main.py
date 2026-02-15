@@ -19,7 +19,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from noaises.agent.core import query_agent_interruptible
+from noaises.agent.core import (
+    query_agent_interruptible,
+    query_stream_agent_interruptible,
+)
 from noaises.interrupt.controller import InterruptController
 from noaises.memory.distiller import distill_memories, should_distill
 from noaises.memory.store import MemoryStore
@@ -155,14 +158,75 @@ async def async_main(surface=None):
                 memory_state, session_summary, memory_guidance=MEMORY_META_PROMPT
             )
 
-            response, was_interrupted = await query_agent_interruptible(
-                user_input + screenshot_context,
-                system_prompt,
-                interrupt,
-                mcp_servers=mcp_servers,
-                extra_allowed_tools=MEMORY_TOOL_NAMES,
-                surface= surface)
-            
+            if settings.enable_streaming:
+                # ── Streaming path (token-by-token) ──
+                agent_stream = query_stream_agent_interruptible(
+                    user_input + screenshot_context,
+                    system_prompt,
+                    interrupt,
+                    mcp_servers=mcp_servers,
+                    extra_allowed_tools=MEMORY_TOOL_NAMES,
+                )
+
+                if voice:
+                    response, was_interrupted = await voice.speak_streaming(
+                        agent_stream,
+                        interrupt,
+                        surface=surface,
+                        personality_name=personality.name,
+                    )
+                else:
+                    response = ""
+                    was_interrupted = False
+                    first_token = True
+                    in_thinking = False
+                    async for event in agent_stream:
+                        if event.kind == "thinking_delta":
+                            if not in_thinking:
+                                in_thinking = True
+                                print("\n  [thinking] ", end="", flush=True)
+                            print(event.thinking, end="", flush=True)
+                        elif event.kind == "text_delta":
+                            if in_thinking:
+                                in_thinking = False
+                                print()  # end thinking line
+                            if first_token:
+                                first_token = False
+                                print(
+                                    f"\n{personality.name}: ",
+                                    end="",
+                                    flush=True,
+                                )
+                            print(event.text, end="", flush=True)
+                        elif event.kind == "tool_use":
+                            if surface:
+                                state = (
+                                    "searching"
+                                    if event.tool_name == "WebSearch"
+                                    else "thinking"
+                                )
+                                surface.set_state(state)
+                        elif event.kind == "tool_result":
+                            if surface and not first_token:
+                                surface.set_state("speaking")
+                        elif event.kind == "done":
+                            response = event.full_response
+                            was_interrupted = event.was_interrupted
+                            break
+                    print()  # newline after typewriter output
+            else:
+                # ── Non-streaming path (full response at once) ──
+                response, was_interrupted = await query_agent_interruptible(
+                    user_input + screenshot_context,
+                    system_prompt,
+                    interrupt,
+                    mcp_servers=mcp_servers,
+                    extra_allowed_tools=MEMORY_TOOL_NAMES,
+                    surface=surface,
+                )
+                if not was_interrupted:
+                    print(f"\n{personality.name}: {response}\n")
+
             interrupt.disable()
 
             # Save memory after each turn (agent may have called memory tools)
@@ -171,30 +235,30 @@ async def async_main(surface=None):
             if was_interrupted:
                 if response:
                     session.append("assistant", response)
-                if surface:
-                    surface.set_state("idle")
-                continue
-
-            # ── Speaking (interruptible via barge-in + click) ──
-            session.append("assistant", response)
-            personality.record_interaction()
-
-            if surface:
-                surface.set_state("speaking")
-
-            print(f"\n{personality.name}: {response}\n")
-
-            if voice:
-                interrupt.enable()
-                await voice.speak_interruptible(response, interrupt)
-                was_interrupted = interrupt.is_interrupted
-                interrupt.disable()
-
-                if was_interrupted:
                     session.append(
                         "system",
                         "[User interrupted before full response was heard]",
                     )
+                if surface:
+                    surface.set_state("idle")
+                continue
+
+            # ── Speaking (non-streaming voice path) ──
+            if not settings.enable_streaming and voice:
+                if surface:
+                    surface.set_state("speaking")
+                interrupt.enable()
+                await voice.speak_interruptible(response, interrupt)
+                if interrupt.is_interrupted:
+                    session.append(
+                        "system",
+                        "[User interrupted before full response was heard]",
+                    )
+                interrupt.disable()
+
+            # ── Post-response bookkeeping ──
+            session.append("assistant", response)
+            personality.record_interaction()
 
             if surface:
                 surface.set_state("idle")

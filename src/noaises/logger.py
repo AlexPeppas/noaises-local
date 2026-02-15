@@ -33,5 +33,7 @@ def log(level: LogLevel, message: str, data: dict[str, Any] | None = None) -> No
     except UnicodeEncodeError:
         # Windows cp1252 console can't encode some Unicode characters
         encoding = getattr(stream, "encoding", "utf-8") or "utf-8"
-        safe = output.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        safe = output.encode(encoding, errors="replace").decode(
+            encoding, errors="replace"
+        )
         print(safe, file=stream)

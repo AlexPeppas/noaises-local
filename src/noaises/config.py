@@ -10,6 +10,9 @@ class Settings(BaseSettings):
         default=Path.home() / ".noaises", validation_alias="NOAISES_HOME"
     )
 
+    # Streaming mode (token-by-token output + streaming TTS)
+    enable_streaming: bool = Field(default=True)
+
     # Memory distillation
     memory_distill_enabled: bool = Field(default=True)
     memory_distill_interval: int = Field(default=5)  # every N turns

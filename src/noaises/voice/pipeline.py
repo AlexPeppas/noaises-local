@@ -7,17 +7,19 @@ Uses sounddevice for microphone capture with simple energy-based VAD
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncGenerator
 
 import numpy as np
 
 if TYPE_CHECKING:
+    from noaises.agent.core import AgentStreamEvent
     from noaises.interrupt.controller import InterruptController
     from noaises.voice.stt import STTProvider
-    from noaises.voice.tts import TTSProvider
+    from noaises.voice.tts import AzureTTS
 
 # Audio settings
 SAMPLE_RATE = 16_000
@@ -36,10 +38,44 @@ BARGE_IN_CONSECUTIVE = 3  # Consecutive loud chunks needed (~300ms sustained)
 BARGE_IN_ONSET_SKIP = 0.5  # Seconds to ignore at TTS start (onset burst)
 
 
+# Regex: sentence-ending punctuation followed by whitespace (or end-of-string)
+_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?:;])\s+|\n")
+
+
+class SentenceBuffer:
+    """Accumulates streaming tokens and flushes complete sentences.
+
+    Sentence boundaries are detected at ``.!?:;`` followed by whitespace
+    or ``\\n``.  This avoids feeding single tokens to TTS (choppy speech)
+    while still streaming text as soon as a natural pause point arrives.
+    """
+
+    def __init__(self) -> None:
+        self._buf = ""
+
+    def add(self, text: str) -> list[str]:
+        """Add a token; return any complete sentences ready to flush."""
+        self._buf += text
+        parts = _SENTENCE_BOUNDARY.split(self._buf)
+        if len(parts) <= 1:
+            return []  # no complete sentence yet
+        # All but the last part are complete sentences
+        sentences = parts[:-1]
+        # reset buffer
+        self._buf = parts[-1]
+        return sentences
+
+    def flush(self) -> str | None:
+        """Return remaining buffered text (if any) and clear the buffer."""
+        leftover = self._buf.strip()
+        self._buf = ""
+        return leftover or None
+
+
 class VoicePipeline:
     """Manages audio capture (STT) and speech output (TTS)."""
 
-    def __init__(self, stt: STTProvider, tts: TTSProvider):
+    def __init__(self, stt: STTProvider, tts: AzureTTS):
         self.stt = stt
         self.tts = tts
         self._shutdown = threading.Event()
@@ -109,6 +145,149 @@ class VoicePipeline:
                 await t
             except (asyncio.CancelledError, Exception):
                 pass
+
+    async def speak_streaming(
+        self,
+        events: AsyncGenerator[AgentStreamEvent, None],
+        interrupt: InterruptController,
+        surface=None,
+        personality_name: str = "LLL",
+    ) -> tuple[str, bool]:
+        """Consume an agent stream, printing tokens and feeding TTS in real time.
+
+        Sentences are buffered and flushed to a ``StreamingTTSSession`` as
+        they complete.  Console output is typewriter-style (token by token).
+
+        Returns ``(full_response, was_interrupted)``.
+        """
+        from noaises.voice.tts import StreamingTTSSession
+
+        buf = SentenceBuffer()
+        session: StreamingTTSSession | None = None
+        full_response = ""
+        was_interrupted = False
+        first_token = True
+        in_thinking = False
+
+        # Start barge-in monitor once TTS begins
+        monitor_task: asyncio.Task | None = None
+
+        try:
+            async for event in events:
+                if interrupt.is_interrupted:
+                    was_interrupted = True
+                    break
+
+                if event.kind == "thinking_delta":
+                    # Print thinking tokens to console (not spoken)
+                    if not in_thinking:
+                        in_thinking = True
+                        print("\n  [thinking] ", end="", flush=True)
+                    print(event.thinking, end="", flush=True)
+
+                elif event.kind == "text_delta":
+                    if in_thinking:
+                        in_thinking = False
+                        print()  # end thinking line
+
+                    # First token: transition surface, start TTS stream, print name
+                    if first_token:
+                        first_token = False
+                        print(f"\n{personality_name}: ", end="", flush=True)
+                        if surface:
+                            surface.set_state("speaking")
+                        session = self.tts.create_stream_session()
+                        session.start()
+                        # Start barge-in monitoring
+                        monitor_task = asyncio.create_task(
+                            self._monitor_for_barge_in(interrupt)
+                        )
+
+                    # Typewriter console output
+                    print(event.text, end="", flush=True)
+
+                    # Buffer and flush complete sentences to TTS
+                    sentences = buf.add(event.text)
+                    if session:
+                        for sentence in sentences:
+                            session.write(sentence + " ")
+
+                elif event.kind == "tool_use":
+                    # Flush partial buffer before tool pause
+                    if session:
+                        leftover = buf.flush()
+                        if leftover:
+                            session.write(leftover + " ")
+                    if surface:
+                        state = (
+                            "searching"
+                            if event.tool_name == "WebSearch"
+                            else "thinking"
+                        )
+                        surface.set_state(state)
+
+                elif event.kind == "tool_result":
+                    # Tool done — surface back to speaking if we had text before
+                    if surface and not first_token:
+                        surface.set_state("speaking")
+
+                elif event.kind == "done":
+                    full_response = event.full_response
+                    was_interrupted = event.was_interrupted
+                    break
+
+            # Flush remaining buffer
+            if session:
+                leftover = buf.flush()
+                if leftover:
+                    session.write(leftover)
+                session.close()
+
+            print()  # newline after typewriter output
+
+            # Wait for TTS audio to finish, racing against barge-in
+            if session and not was_interrupted:
+                wait_task = asyncio.create_task(session.wait())
+                tasks_to_race = [wait_task]
+                if monitor_task and not monitor_task.done():
+                    tasks_to_race.append(monitor_task)
+
+                done, pending = await asyncio.wait(
+                    tasks_to_race, return_when=asyncio.FIRST_COMPLETED
+                )
+
+                if wait_task not in done:
+                    # Barge-in during audio tail — stop TTS
+                    was_interrupted = True
+                    session.stop()
+                    wait_task.cancel()
+                    try:
+                        await wait_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+                # Clean up monitor
+                for t in pending:
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        except Exception as exc:
+            print(f"\n[voice] Streaming speak error: {exc}", file=sys.stderr)
+        finally:
+            # Ensure TTS stream is closed and monitor cancelled on any exit
+            if session:
+                session.close()
+            if monitor_task and not monitor_task.done():
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        return full_response, was_interrupted
 
     async def _monitor_for_barge_in(self, interrupt: InterruptController) -> None:
         """Listen for user speech during TTS playback (barge-in detection).
