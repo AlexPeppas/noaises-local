@@ -3,8 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Protocol
 import azure.cognitiveservices.speech as speechsdk
+
+# Non-BMP Unicode (emojis, symbols above U+FFFF) — Azure SDK's
+# pal_string_to_wstring chokes on these on Windows.
+_NON_BMP_RE = re.compile(r"[\U00010000-\U0010FFFF]")
+
+
+def _sanitize_for_tts(text: str) -> str:
+    """Strip characters that crash Azure SDK's wide-string conversion."""
+    cleaned = _NON_BMP_RE.sub("", text)
+    return cleaned
 
 
 class TTSProvider(Protocol):
@@ -39,7 +50,9 @@ class StreamingTTSSession:
 
     def write(self, text: str) -> None:
         """Feed a chunk of text into the stream."""
-        self._request.input_stream.write(text)
+        clean = _sanitize_for_tts(text)
+        if clean.strip():  # skip empty/whitespace-only chunks (e.g. emoji-only)
+            self._request.input_stream.write(clean)
 
     def close(self) -> None:
         """Signal that no more text will arrive."""
@@ -106,6 +119,7 @@ class AzureTTS:
             self._speaking = False
 
     def _speak_internal(self, text: str):
+        text = _sanitize_for_tts(text)
         future = self.synthesizer.speak_text_async(text)
         result = future.get()
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:

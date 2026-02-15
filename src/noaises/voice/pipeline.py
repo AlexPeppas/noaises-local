@@ -32,10 +32,10 @@ SILENCE_DURATION = 1.5  # Seconds of silence before stopping
 MAX_RECORD_SECONDS = 30  # Hard cap on recording length
 CHUNK_DURATION = 0.1  # Seconds per read chunk
 
-# Barge-in settings (higher threshold to filter speaker bleed from TTS)
-BARGE_IN_THRESHOLD = 0.04  # ~5x silence threshold — filters speaker bleed
-BARGE_IN_CONSECUTIVE = 3  # Consecutive loud chunks needed (~300ms sustained)
-BARGE_IN_ONSET_SKIP = 0.5  # Seconds to ignore at TTS start (onset burst)
+# Barge-in settings — tuned for headphone use (no speaker-to-mic bleed).
+BARGE_IN_THRESHOLD = 0.02  # Lower OK with headphones — real speech is loud and clear
+BARGE_IN_CONSECUTIVE = 4  # ~400ms sustained speech to confirm intent
+BARGE_IN_ONSET_SKIP = 0.3  # Brief skip for mic open transient
 
 
 # Regex: sentence-ending punctuation followed by whitespace (or end-of-string)
@@ -146,6 +146,10 @@ class VoicePipeline:
             except (asyncio.CancelledError, Exception):
                 pass
 
+    # Seconds to sleep after TTS finishes so residual speaker audio
+    # dissipates before the next mic capture starts.
+    _POST_TTS_COOLDOWN = 0.4
+
     async def speak_streaming(
         self,
         events: AsyncGenerator[AgentStreamEvent, None],
@@ -158,6 +162,11 @@ class VoicePipeline:
         Sentences are buffered and flushed to a ``StreamingTTSSession`` as
         they complete.  Console output is typewriter-style (token by token).
 
+        Barge-in monitoring runs concurrently — tuned for headphone use
+        (no speaker-to-mic bleed).  The user can interrupt by speaking
+        over the assistant; sustained speech above the threshold fires
+        the interrupt controller and stops TTS immediately.
+
         Returns ``(full_response, was_interrupted)``.
         """
         from noaises.voice.tts import StreamingTTSSession
@@ -169,7 +178,7 @@ class VoicePipeline:
         first_token = True
         in_thinking = False
 
-        # Start barge-in monitor once TTS begins
+        # Barge-in monitor — started once TTS begins
         monitor_task: asyncio.Task | None = None
 
         try:
@@ -256,7 +265,13 @@ class VoicePipeline:
                     tasks_to_race, return_when=asyncio.FIRST_COMPLETED
                 )
 
-                if wait_task not in done:
+                if wait_task in done:
+                    # TTS finished first — retrieve result (may be an error)
+                    try:
+                        wait_task.result()
+                    except Exception as exc:
+                        print(f"[voice] TTS stream error: {exc}", file=sys.stderr)
+                else:
                     # Barge-in during audio tail — stop TTS
                     was_interrupted = True
                     session.stop()
@@ -266,13 +281,18 @@ class VoicePipeline:
                     except (asyncio.CancelledError, Exception):
                         pass
 
-                # Clean up monitor
+                # Clean up remaining tasks
                 for t in pending:
                     t.cancel()
                     try:
                         await t
                     except (asyncio.CancelledError, Exception):
                         pass
+
+            # Brief cooldown so residual audio dissipates
+            # before the next mic capture starts.
+            if session:
+                await asyncio.sleep(self._POST_TTS_COOLDOWN)
 
         except Exception as exc:
             print(f"\n[voice] Streaming speak error: {exc}", file=sys.stderr)
