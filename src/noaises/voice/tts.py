@@ -36,7 +36,7 @@ class AzureTTS:
         self._speaking = True
         try:
             await asyncio.to_thread(
-                lambda: self._speak_internal(self,text)
+                lambda: self._speak_internal(text)
             )
         finally:
             self._speaking = False
