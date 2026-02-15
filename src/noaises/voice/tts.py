@@ -24,7 +24,7 @@ class AzureTTS:
         self,
         speech_key: str,
         region: str,
-        voice: str = "en-US-JennyNeural",
+        voice: str = "en-US-AvaMultilingualNeural",
     ):
         config = speechsdk.SpeechConfig(subscription=speech_key, region=region)
         config.speech_synthesis_voice_name = voice
@@ -42,7 +42,8 @@ class AzureTTS:
             self._speaking = False
 
     def _speak_internal(self, text: str):
-        result = self.synthesizer.speak_text_async(text)
+        future = self.synthesizer.speak_text_async(text)
+        result = future.get()
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             print("Speech synthesized for text [{}]".format(text))
         elif result.reason == speechsdk.ResultReason.Canceled:
