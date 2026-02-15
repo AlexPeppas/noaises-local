@@ -213,13 +213,25 @@ async def async_main(surface=None):
         print(f"\n[error] Unexpected error: {e}")
         traceback.print_exc()
     finally:
+        # Stop all blocking voice operations so threads can exit
+        if voice:
+            voice.shutdown()
+
         # Save memory on exit
         memory_store.save_all(full_memory)
+
         # Play sleep animation, then close
         if surface:
             surface.set_state("sleeping")
-            await asyncio.sleep(3)  # let the zzz animation play
+            try:
+                await asyncio.sleep(3)  # let the zzz animation play
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                pass  # second Ctrl+C — skip animation
             surface.destroy()
+
+        # Force exit to kill any lingering thread-pool threads
+        # (sounddevice stream.read, input(), etc. that can't be interrupted)
+        os._exit(0)
 
 
 def _run_async_loop(surface):

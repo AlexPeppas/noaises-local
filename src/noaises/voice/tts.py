@@ -54,6 +54,13 @@ class AzureTTS:
         result.get
         return result
     
+    def shutdown(self) -> None:
+        """Force-stop TTS immediately. Sync, safe to call from any thread."""
+        try:
+            self.synthesizer.stop_speaking_async()
+        except Exception:
+            pass
+
     async def stop(self) -> None:
         """Stop TTS playback immediately."""
         if self._speaking:

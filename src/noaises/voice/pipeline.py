@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -41,6 +42,12 @@ class VoicePipeline:
     def __init__(self, stt: STTProvider, tts: TTSProvider):
         self.stt = stt
         self.tts = tts
+        self._shutdown = threading.Event()
+
+    def shutdown(self) -> None:
+        """Signal all blocking operations to stop. Safe to call from any thread."""
+        self._shutdown.set()
+        self.tts.shutdown()
 
     async def listen(self) -> str:
         """Capture audio from mic until silence, then transcribe."""
@@ -127,7 +134,7 @@ class VoicePipeline:
             )
             stream.start()
             try:
-                while not interrupt.is_interrupted:
+                while not interrupt.is_interrupted and not self._shutdown.is_set():
                     data, _ = stream.read(chunk_samples)
                     chunk = data[:, 0] if data.ndim > 1 else data.flatten()
                     rms = float(np.sqrt(np.mean(chunk**2)))
@@ -181,6 +188,8 @@ class VoicePipeline:
             stream.start()
             try:
                 for i in range(max_chunks):
+                    if self._shutdown.is_set():
+                        break
                     data, overflowed = stream.read(chunk_samples)
                     chunk = data[:, 0] if data.ndim > 1 else data.flatten()
                     rms = float(np.sqrt(np.mean(chunk**2)))
