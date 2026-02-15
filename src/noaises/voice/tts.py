@@ -5,17 +5,37 @@ from __future__ import annotations
 import asyncio
 import re
 from typing import Protocol
+
 import azure.cognitiveservices.speech as speechsdk
 
-# Non-BMP Unicode (emojis, symbols above U+FFFF) — Azure SDK's
-# pal_string_to_wstring chokes on these on Windows.
-_NON_BMP_RE = re.compile(r"[\U00010000-\U0010FFFF]")
+
+# Regex patterns for sanitizing text before TTS ingestion.
+# Azure's streaming input_stream.write() chokes on emoji and markdown
+# that the batch speak_text_async() handles internally.
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001f600-\U0001f64f"  # emoticons
+    "\U0001f300-\U0001f5ff"  # symbols & pictographs
+    "\U0001f680-\U0001f6ff"  # transport & map
+    "\U0001f1e0-\U0001f1ff"  # flags
+    "\U0001f900-\U0001f9ff"  # supplemental symbols
+    "\U0001fa00-\U0001fa6f"  # chess symbols
+    "\U0001fa70-\U0001faff"  # symbols extended-A
+    "\U00002702-\U000027b0"  # dingbats
+    "\U0000fe00-\U0000fe0f"  # variation selectors
+    "\U0000200d"  # zero-width joiner
+    "]+",
+    flags=re.UNICODE,
+)
+_MARKDOWN_RE = re.compile(r"(\*{1,2}|_{1,2}|`{1,3}|~{2})")
 
 
 def _sanitize_for_tts(text: str) -> str:
-    """Strip characters that crash Azure SDK's wide-string conversion."""
-    cleaned = _NON_BMP_RE.sub("", text)
-    return cleaned
+    """Strip emoji and markdown formatting so Azure TTS gets clean text."""
+    text = _EMOJI_RE.sub("", text)
+    text = _MARKDOWN_RE.sub("", text)
+    return text.strip()
+
 
 
 class TTSProvider(Protocol):
@@ -49,9 +69,9 @@ class StreamingTTSSession:
         self._future = self._synthesizer.speak_async(self._request)
 
     def write(self, text: str) -> None:
-        """Feed a chunk of text into the stream."""
+        """Feed a chunk of text into the stream (sanitized for TTS)."""
         clean = _sanitize_for_tts(text)
-        if clean.strip():  # skip empty/whitespace-only chunks (e.g. emoji-only)
+        if clean:
             self._request.input_stream.write(clean)
 
     def close(self) -> None:
@@ -119,8 +139,7 @@ class AzureTTS:
             self._speaking = False
 
     def _speak_internal(self, text: str):
-        text = _sanitize_for_tts(text)
-        future = self.synthesizer.speak_text_async(text)
+        future = self.synthesizer.speak_text_async(_sanitize_for_tts(text))
         result = future.get()
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
             print("Speech synthesized for text [{}]".format(text))
