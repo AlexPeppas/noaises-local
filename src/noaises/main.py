@@ -50,7 +50,7 @@ def _init_voice():
     """Try to initialize the voice pipeline. Returns VoicePipeline or None."""
     speech_key = os.environ.get("AZURE_SPEECH_KEY")
     speech_region = os.environ.get("AZURE_SPEECH_REGION")
-
+    speech_voice = os.environ.get("AZURE_SPEECH_VOICE")
     try:
         from noaises.voice.stt import WhisperSTT
         from noaises.voice.tts import AzureTTS
