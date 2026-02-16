@@ -25,6 +25,7 @@ from noaises.agent.core import (
 )
 from noaises.interrupt.controller import InterruptController
 from noaises.memory.distiller import distill_memories, should_distill
+from noaises.personality.distiller import distill_personality
 from noaises.memory.store import MemoryStore
 from noaises.memory.tools import (
     MEMORY_META_PROMPT,
@@ -267,6 +268,9 @@ async def async_main(surface=None):
             if should_distill(turn_count):
                 asyncio.create_task(
                     distill_memories(full_memory, session, memory_store)
+                )
+                asyncio.create_task(
+                    distill_personality(personality, full_memory, session, memory_store)
                 )
 
     except (KeyboardInterrupt, EOFError):

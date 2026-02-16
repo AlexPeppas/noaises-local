@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import json
 import tomllib
+from datetime import datetime, timezone
 from pathlib import Path
+
+MAX_TONE_ADJUSTMENTS = 8
+MAX_LEARNED_TRAITS = 12
+MAX_COMPANION_GUESSES = 10
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are {name}, an autonomous AI companion that lives locally on the host's machine.
@@ -55,10 +60,14 @@ class PersonalityEngine:
             self.evolution = {
                 "tone_adjustments": [],
                 "learned_traits": [],
+                "companion_guesses": [],
                 "interaction_count": 0,
                 "last_evolved": None,
             }
             self._save_evolution()
+
+        # Migration for existing installs missing companion_guesses
+        self.evolution.setdefault("companion_guesses", [])
 
     def build_system_prompt(
         self,
@@ -74,17 +83,30 @@ class PersonalityEngine:
             else "none specified"
         )
 
-        # Format evolution adjustments
+        # Format evolution section
         evolution_section = ""
         adjustments = self.evolution.get("tone_adjustments", [])
         learned = self.evolution.get("learned_traits", [])
-        if adjustments or learned:
+        guesses = self.evolution.get("companion_guesses", [])
+        if adjustments or learned or guesses:
             parts = []
             if adjustments:
                 parts.append("- Tone adjustments: " + "; ".join(adjustments))
             if learned:
                 parts.append("- Learned preferences: " + "; ".join(learned))
-            evolution_section = "\n## Evolved Traits\n" + "\n".join(parts) + "\n"
+            if guesses:
+                guess_lines = []
+                for g in guesses:
+                    guess = g.get("guess", "")
+                    confidence = g.get("confidence", "unknown")
+                    since = g.get("since", "unknown")
+                    guess_lines.append(
+                        f"  - {guess} ({confidence} confidence, since {since})"
+                    )
+                parts.append(
+                    "- Working hypotheses about the user:\n" + "\n".join(guess_lines)
+                )
+            evolution_section = "\n## Personality Evolution\n" + "\n".join(parts) + "\n"
 
         return SYSTEM_PROMPT_TEMPLATE.format(
             name=self.name,
@@ -103,20 +125,25 @@ class PersonalityEngine:
         self.evolution["interaction_count"] += 1
         self._save_evolution()
 
-    def evolve(self, observations: list[dict]):
-        """Apply personality observations from memory consolidation.
+    def apply_evolution(self, result: dict):
+        """Apply a full-state evolution result from the personality distiller.
 
-        Each observation should have 'category' and 'content'.
-        Only 'personality_observation' category entries are applied here.
+        *result* is the complete desired state — not a delta. Keys:
+        ``tone_adjustments``, ``learned_traits``, ``companion_guesses``.
+        Each is capped to its maximum length.
         """
-        from datetime import datetime, timezone
-
-        for obs in observations:
-            if obs.get("category") != "personality_observation":
-                continue
-            content = obs.get("content", "")
-            if content and content not in self.evolution["learned_traits"]:
-                self.evolution["learned_traits"].append(content)
+        if "tone_adjustments" in result:
+            self.evolution["tone_adjustments"] = list(result["tone_adjustments"])[
+                :MAX_TONE_ADJUSTMENTS
+            ]
+        if "learned_traits" in result:
+            self.evolution["learned_traits"] = list(result["learned_traits"])[
+                :MAX_LEARNED_TRAITS
+            ]
+        if "companion_guesses" in result:
+            self.evolution["companion_guesses"] = list(result["companion_guesses"])[
+                :MAX_COMPANION_GUESSES
+            ]
 
         self.evolution["last_evolved"] = datetime.now(timezone.utc).isoformat(
             timespec="seconds"
