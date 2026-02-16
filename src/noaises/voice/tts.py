@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
 from typing import Protocol
 
 import azure.cognitiveservices.speech as speechsdk
@@ -34,8 +35,7 @@ def _sanitize_for_tts(text: str) -> str:
     """Strip emoji and markdown formatting so Azure TTS gets clean text."""
     text = _EMOJI_RE.sub("", text)
     text = _MARKDOWN_RE.sub("", text)
-    return text.strip()
-
+    return text
 
 
 class TTSProvider(Protocol):
@@ -57,25 +57,38 @@ class StreamingTTSSession:
     def __init__(
         self,
         synthesizer: speechsdk.SpeechSynthesizer,
+        on_error=None,
     ):
         self._synthesizer = synthesizer
         self._request = speechsdk.SpeechSynthesisRequest(
             input_type=speechsdk.SpeechSynthesisRequestInputType.TextStream,
         )
         self._future: speechsdk.ResultFuture | None = None
+        self._has_content = False
+        self._started = False
+        self._on_error = on_error
 
     def start(self) -> None:
-        """Begin synthesis — audio will start as text is written."""
-        self._future = self._synthesizer.speak_async(self._request)
+        """Mark session as ready — actual speak_async is deferred to first write."""
+        self._started = True
+
+    def _ensure_speaking(self) -> None:
+        """Fire speak_async on first real write."""
+        if self._future is None and self._started:
+            self._future = self._synthesizer.speak_async(self._request)
 
     def write(self, text: str) -> None:
         """Feed a chunk of text into the stream (sanitized for TTS)."""
         clean = _sanitize_for_tts(text)
-        if clean:
+        if clean and not clean.isspace():
+            self._ensure_speaking()
             self._request.input_stream.write(clean)
+            self._has_content = True
 
     def close(self) -> None:
         """Signal that no more text will arrive."""
+        if not self._has_content:
+            return  # never started synthesis — nothing to close
         try:
             self._request.input_stream.close()
         except Exception:
@@ -83,12 +96,20 @@ class StreamingTTSSession:
 
     async def wait(self) -> None:
         """Wait for all audio to finish playing (runs blocking .get() in thread)."""
-        if self._future is not None:
+        if not self._has_content or self._future is None:
+            return  # nothing was synthesized
+        try:
             result = await asyncio.to_thread(self._future.get)
             if result.reason == speechsdk.ResultReason.Canceled:
                 details = result.cancellation_details
                 if details.reason == speechsdk.CancellationReason.Error:
                     print(f"[tts-stream] Synthesis error: {details.error_details}")
+                    if self._on_error:
+                        self._on_error()
+        except Exception as exc:
+            print(f"[tts-stream] wait() error: {exc}", file=sys.stderr)
+            if self._on_error:
+                self._on_error()
 
     def stop(self) -> None:
         """Immediately halt playback and close the stream. Sync, any thread."""
@@ -126,9 +147,20 @@ class AzureTTS:
         self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=config)
         self._speaking = False
 
+    def _reset_synthesizer(self) -> None:
+        """Recreate the synthesizer to ensure clean state after errors."""
+        try:
+            self.synthesizer.stop_speaking_async()
+        except Exception:
+            pass
+        self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=self._config)
+
     def create_stream_session(self) -> StreamingTTSSession:
         """Create a new streaming TTS session backed by this synthesizer."""
-        return StreamingTTSSession(self.synthesizer)
+        return StreamingTTSSession(
+            self.synthesizer,
+            on_error=self._reset_synthesizer,
+        )
 
     async def speak(self, text: str) -> None:
         """Speak the given text aloud."""

@@ -131,8 +131,12 @@ class VoicePipeline:
         )
 
         if speak_task in done:
-            # Normal completion — cancel the monitor
+            # Normal completion — cancel the monitor; retrieve result to surface errors
             monitor_task.cancel()
+            try:
+                speak_task.result()
+            except Exception as exc:
+                print(f"[voice] TTS error: {exc}", file=sys.stderr)
         else:
             # Barge-in or external interrupt — stop TTS
             await self.tts.stop()
