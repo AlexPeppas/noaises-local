@@ -11,8 +11,7 @@ import azure.cognitiveservices.speech as speechsdk
 
 
 # Regex patterns for sanitizing text before TTS ingestion.
-# Azure's streaming input_stream.write() chokes on emoji and markdown
-# that the batch speak_text_async() handles internally.
+# Strip emoji and markdown so the synthesizer gets clean prose.
 _EMOJI_RE = re.compile(
     "["
     "\U0001f600-\U0001f64f"  # emoticons
@@ -47,11 +46,14 @@ class TTSProvider(Protocol):
 
 
 class StreamingTTSSession:
-    """A single streaming TTS session using Azure's text-stream synthesis.
+    """A streaming TTS session using queued ``speak_text_async()`` calls.
 
-    Text is fed incrementally via ``write()``; audio starts playing before
-    all text has arrived. Call ``close()`` to signal end-of-text, then
-    ``wait()`` to block until all audio has finished playing.
+    Each ``write()`` fires a separate ``speak_text_async()``; the Azure SDK
+    queues them internally and plays audio in order. Audio starts after the
+    first sentence arrives — no TextStream/V2 endpoint needed.
+
+    Call ``close()`` when done writing, then ``wait()`` to block until all
+    queued audio has finished playing.
     """
 
     def __init__(
@@ -60,63 +62,51 @@ class StreamingTTSSession:
         on_error=None,
     ):
         self._synthesizer = synthesizer
-        self._request = speechsdk.SpeechSynthesisRequest(
-            input_type=speechsdk.SpeechSynthesisRequestInputType.TextStream,
-        )
-        self._future: speechsdk.ResultFuture | None = None
-        self._has_content = False
+        self._futures: list[speechsdk.ResultFuture] = []
         self._started = False
         self._on_error = on_error
 
     def start(self) -> None:
-        """Mark session as ready — actual speak_async is deferred to first write."""
+        """Mark session as ready to accept writes."""
         self._started = True
 
-    def _ensure_speaking(self) -> None:
-        """Fire speak_async on first real write."""
-        if self._future is None and self._started:
-            self._future = self._synthesizer.speak_async(self._request)
-
     def write(self, text: str) -> None:
-        """Feed a chunk of text into the stream (sanitized for TTS)."""
+        """Queue a sentence for synthesis (sanitized for TTS)."""
+        if not self._started:
+            return
         clean = _sanitize_for_tts(text)
         if clean and not clean.isspace():
-            self._ensure_speaking()
-            self._request.input_stream.write(clean)
-            self._has_content = True
+            future = self._synthesizer.speak_text_async(clean)
+            self._futures.append(future)
 
     def close(self) -> None:
-        """Signal that no more text will arrive."""
-        if not self._has_content:
-            return  # never started synthesis — nothing to close
-        try:
-            self._request.input_stream.close()
-        except Exception:
-            pass
+        """Signal that no more text will arrive (no-op — kept for interface compat)."""
+        pass
 
     async def wait(self) -> None:
-        """Wait for all audio to finish playing (runs blocking .get() in thread)."""
-        if not self._has_content or self._future is None:
-            return  # nothing was synthesized
-        try:
-            result = await asyncio.to_thread(self._future.get)
-            if result.reason == speechsdk.ResultReason.Canceled:
-                details = result.cancellation_details
-                if details.reason == speechsdk.CancellationReason.Error:
-                    print(f"[tts-stream] Synthesis error: {details.error_details}")
+        """Wait for all queued audio to finish playing."""
+        if not self._futures:
+            return
+        error_fired = False
+        for future in self._futures:
+            try:
+                result = await asyncio.to_thread(future.get)
+                if result.reason == speechsdk.ResultReason.Canceled and not error_fired:
+                    details = result.cancellation_details
+                    if details.reason == speechsdk.CancellationReason.Error:
+                        print(f"[tts-stream] Synthesis error: {details.error_details}")
+                        if self._on_error:
+                            self._on_error()
+                        error_fired = True
+            except Exception as exc:
+                if not error_fired:
+                    print(f"[tts-stream] wait() error: {exc}", file=sys.stderr)
                     if self._on_error:
                         self._on_error()
-        except Exception as exc:
-            print(f"[tts-stream] wait() error: {exc}", file=sys.stderr)
-            if self._on_error:
-                self._on_error()
+                    error_fired = True
 
     def stop(self) -> None:
-        """Immediately halt playback and close the stream. Sync, any thread."""
-        try:
-            self._request.input_stream.close()
-        except Exception:
-            pass
+        """Immediately halt playback and clear the queue. Sync, any thread."""
         try:
             self._synthesizer.stop_speaking_async()
         except Exception:
@@ -127,7 +117,6 @@ class AzureTTS:
     """TTS using Azure Cognitive Services Speech SDK.
 
     Requires AZURE_SPEECH_KEY and AZURE_SPEECH_REGION env vars.
-    Uses the V2 WebSocket endpoint for streaming text input support.
     """
 
     def __init__(
@@ -138,11 +127,6 @@ class AzureTTS:
     ):
         config = speechsdk.SpeechConfig(subscription=speech_key, region=region)
         config.speech_synthesis_voice_name = voice
-        # V2 WebSocket endpoint — required for SpeechSynthesisRequest(TextStream)
-        config.set_property(
-            speechsdk.PropertyId.SpeechServiceConnection_Endpoint,
-            f"wss://{region}.tts.speech.microsoft.com/cognitiveservices/websocket/v2",
-        )
         self._config = config
         self.synthesizer = speechsdk.SpeechSynthesizer(speech_config=config)
         self._speaking = False
