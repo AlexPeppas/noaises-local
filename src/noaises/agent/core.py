@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from ..config import settings
 from ..logger import log
+from ..resources import get_claude_cli_path
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -77,6 +78,7 @@ def create_options(
         setting_sources=["project"],
         cwd=settings.noaises_home_resolved,
         include_partial_messages=include_partial_messages,
+        cli_path=get_claude_cli_path(),
     )
 
 

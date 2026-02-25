@@ -7,6 +7,7 @@ to parse recent session history and emit structured memory operations.
 from __future__ import annotations
 
 import json
+import os
 
 import anthropic
 
@@ -52,6 +53,14 @@ async def distill_memories(
 ) -> None:
     """Run background memory distillation (fire-and-forget with asyncio.create_task)."""
     try:
+        # 0. Check for API key — distillation requires direct Anthropic API access
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            print(
+                "[distill] No API key — skipping background distillation (memory tools still active)."
+            )
+            return
+
         # 1. Load recent session entries
         entries = session.get_today()
         if not entries:
@@ -74,7 +83,7 @@ async def distill_memories(
         )
 
         # 4. Call Haiku for extraction
-        client = anthropic.AsyncAnthropic()
+        client = anthropic.AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model=settings.memory_distill_model,
             max_tokens=1024,

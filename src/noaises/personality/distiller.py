@@ -9,6 +9,7 @@ evolution fields.
 from __future__ import annotations
 
 import json
+import os
 
 import anthropic
 
@@ -71,6 +72,12 @@ async def distill_personality(
 ) -> None:
     """Run background personality distillation (fire-and-forget safe)."""
     try:
+        # 0. Check for API key — distillation requires direct Anthropic API access
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            print("[personality] No API key — skipping personality distillation.")
+            return
+
         # 1. Load recent session entries
         entries = session.get_today()
         if not entries:
@@ -102,7 +109,7 @@ async def distill_personality(
         )
 
         # 4. Call Haiku for analysis
-        client = anthropic.AsyncAnthropic()
+        client = anthropic.AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model=settings.memory_distill_model,
             max_tokens=1024,

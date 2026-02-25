@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -23,6 +22,7 @@ from noaises.agent.core import (
     query_agent_interruptible,
     query_stream_agent_interruptible,
 )
+from noaises.auth import ensure_authenticated
 from noaises.interrupt.controller import InterruptController
 from noaises.memory.distiller import distill_memories, should_distill
 from noaises.personality.distiller import distill_personality
@@ -33,14 +33,14 @@ from noaises.memory.tools import (
     create_memory_mcp_server,
 )
 from noaises.personality.engine import PersonalityEngine
+from noaises.resources import get_config_dir, get_dotenv_path, get_surface_dir
 from noaises.sessions.engine import SessionEngine
 from noaises.tools.screen_capture import CaptureScreenTool
 from .config import settings
 
-# Repo stuff
-BASE_DIR = Path(__file__).resolve().parent.parent.parent  # noaises-local/
-CONFIG_DIR = BASE_DIR / "config"
-SURFACE_DIR = Path(__file__).resolve().parent / "surface" / "web"
+# Paths — frozen-aware via resources.py
+CONFIG_DIR = get_config_dir()
+SURFACE_DIR = get_surface_dir()
 
 # Home dir stuff
 HOME_DIR = settings.noaises_home_resolved  # ~/.noaises
@@ -308,7 +308,9 @@ def _run_async_loop(surface):
 
 
 def main():
-    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(get_dotenv_path())
+
+    ensure_authenticated()
 
     surface = _init_surface()
 
