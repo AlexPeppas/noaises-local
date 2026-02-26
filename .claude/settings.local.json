@@ -10,7 +10,9 @@
       "Bash(where.exe:*)",
       "Bash(powershell.exe -Command \"& { uv sync }\")",
       "Bash(cmd.exe /c \"cd C:\\\\Users\\\\apeppas\\\\Repos\\\\LLL\\\\noaises-local && uv sync 2>&1\")",
-      "Bash(powershell.exe -Command \"python --version 2>&1\")"
+      "Bash(powershell.exe -Command \"python --version 2>&1\")",
+      "Bash(find C:\\\\Users\\\\apeppas\\\\Repos\\\\noaises-local:*)",
+      "Bash(find:*)"
     ]
   }
 }

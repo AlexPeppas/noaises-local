@@ -34,7 +34,13 @@ from noaises.memory.tools import (
 )
 from noaises.personality.engine import PersonalityEngine
 from noaises.sessions.engine import SessionEngine
+from noaises.tools.camera_tool import (
+    CAMERA_META_PROMPT,
+    CAMERA_TOOL_NAMES,
+    create_camera_mcp_server,
+)
 from noaises.tools.screen_capture import CaptureScreenTool
+from noaises.vision.pipeline import VisionPipeline
 from .config import settings
 
 # Repo stuff
@@ -97,6 +103,20 @@ async def async_main(surface=None):
     session = SessionEngine(SESSIONS_DIR)
     personality = PersonalityEngine(CONFIG_DIR / "personality.toml", PERSONALITY_DIR)
     screen_capture = CaptureScreenTool(ARTIFACTS_DIR / "screenshots")
+    vision_pipeline = VisionPipeline(
+        settings.camera_device_index,
+        settings.camera_frame_interval,
+        settings.vision_model_name,
+        settings.vision_max_frames,
+    )
+
+    # Optionally pre-load vision model so camera_on is instant
+    if settings.vision_preload:
+        print("[vision] Pre-loading vision model...")
+        await asyncio.to_thread(vision_pipeline._model.load)
+        print("[vision] Vision model ready.")
+    else:
+        print("[vision] Vision model will load on first camera use (~80s).")
 
     # Initialize optional voice
     voice = _init_voice()
@@ -128,6 +148,19 @@ async def async_main(surface=None):
             # Store user message
             session.append("user", user_input)
 
+            # -- Vision: flush buffered frames if camera is active --
+            vision_context = ""
+            if vision_pipeline.is_active:
+                frame_count = vision_pipeline.pending_frame_count
+                if frame_count > 0:
+                    print(f"[vision] Processing {frame_count} frames...")
+                description = await vision_pipeline.flush_and_describe()
+                if description:
+                    print(f"[vision] Done: {description[:150]}[TRUNCATED]")
+                    vision_context = (
+                        f"\n\n[Visual observation of the user: {description}]"
+                    )
+
             # -- Screen capture (if user asks about their screen) --
             screenshot_context = ""
             if CaptureScreenTool.detect_intent(user_input):
@@ -148,25 +181,28 @@ async def async_main(surface=None):
 
             turn_count += 1
 
-            # Rebuild MCP server each turn (binds to current memory state)
+            # Rebuild MCP servers each turn
             memory_server = create_memory_mcp_server(full_memory)
-            mcp_servers = {"memory": memory_server}
+            camera_server = create_camera_mcp_server(vision_pipeline)
+            mcp_servers = {"memory": memory_server, "camera": camera_server}
 
             # Build system prompt with memory state + guidance
             memory_state = memory_store.build_memory_state(full_memory)
             session_summary = session.get_today_summary()
             system_prompt = personality.build_system_prompt(
-                memory_state, session_summary, memory_guidance=MEMORY_META_PROMPT
+                memory_state,
+                session_summary,
+                memory_guidance=MEMORY_META_PROMPT + "\n" + CAMERA_META_PROMPT,
             )
 
             if settings.enable_streaming:
                 # ── Streaming path (token-by-token) ──
                 agent_stream = query_stream_agent_interruptible(
-                    user_input + screenshot_context,
+                    user_input + vision_context + screenshot_context,
                     system_prompt,
                     interrupt,
                     mcp_servers=mcp_servers,
-                    extra_allowed_tools=MEMORY_TOOL_NAMES,
+                    extra_allowed_tools=MEMORY_TOOL_NAMES + CAMERA_TOOL_NAMES,
                 )
 
                 if voice:
@@ -218,11 +254,11 @@ async def async_main(surface=None):
             else:
                 # ── Non-streaming path (full response at once) ──
                 response, was_interrupted = await query_agent_interruptible(
-                    user_input + screenshot_context,
+                    user_input + vision_context + screenshot_context,
                     system_prompt,
                     interrupt,
                     mcp_servers=mcp_servers,
-                    extra_allowed_tools=MEMORY_TOOL_NAMES,
+                    extra_allowed_tools=MEMORY_TOOL_NAMES + CAMERA_TOOL_NAMES,
                     surface=surface,
                 )
                 if not was_interrupted:
@@ -284,6 +320,7 @@ async def async_main(surface=None):
         # Stop all blocking voice operations so threads can exit
         if voice:
             voice.shutdown()
+        vision_pipeline.shutdown()
 
         # Save memory on exit
         memory_store.save_all(full_memory)
