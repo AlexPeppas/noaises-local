@@ -12,6 +12,7 @@ the page loads, avoiding the race where WebView2 paints a white frame first.
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
@@ -107,10 +108,19 @@ class DesktopSurface:
             self._window.destroy()
 
     def set_state(self, state: str):
-        """Update animation state: idle, listening, thinking, searching, speaking, sleeping."""
+        """Update animation state: idle, listening, thinking, searching, speaking, sleeping, seeing, remembering.
+
+        Non-blocking: dispatches evaluate_js on a daemon thread so the
+        asyncio event loop is never stalled waiting for the webview's
+        main thread to finish rendering.
+        """
         self._state = state
         if self._window:
-            self._window.evaluate_js(f"setPersonaState('{state}')")
+            threading.Thread(
+                target=self._window.evaluate_js,
+                args=(f"setPersonaState('{state}')",),
+                daemon=True,
+            ).start()
 
     # -- JS API bridge (called from JavaScript) --
 

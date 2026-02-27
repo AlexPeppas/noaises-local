@@ -24,11 +24,10 @@ class VisionPipeline:
         self,
         device_index: int = 0,
         frame_interval: float = 0.5,
-        model_name: str = "Qwen/Qwen2-VL-2B-Instruct",
-        max_frames: int = 6,
+        model_name: str = "vikhyatk/moondream2",
     ):
         self._camera = CameraCapture(device_index, frame_interval)
-        self._model = VisionModel(model_name, max_frames)
+        self._model = VisionModel(model_name)
 
     @property
     def is_active(self) -> bool:

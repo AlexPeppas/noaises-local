@@ -309,6 +309,166 @@ html, body {
   animation: zzz-float 2.4s 1.2s ease-in-out infinite;
 }
 
+/* ── Seeing — teal/green glow, viewfinder, scan line ──── */
+
+@keyframes focus-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50%      { transform: translateX(-50%) scale(1.03); }
+}
+
+.persona--seeing {
+  animation: focus-pulse 1.8s ease-in-out infinite;
+}
+
+.persona--seeing .lottie-wrap {
+  filter: hue-rotate(-50deg) saturate(1.5) brightness(1.15);
+}
+
+.persona--seeing .glow-ring {
+  opacity: 1;
+  border-color: #00b894;
+  box-shadow: 0 0 30px rgba(0, 184, 148, 0.4), inset 0 0 20px rgba(0, 184, 148, 0.1);
+  animation: pulse-glow 1.8s ease-in-out infinite;
+}
+
+.persona--seeing .viewfinder { opacity: 1; }
+
+/* ── Remembering — warm purple, cloud overlay ─────────── */
+
+@keyframes gentle-sway {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  30%      { transform: translateX(-50%) translateY(-5px); }
+  70%      { transform: translateX(-50%) translateY(3px); }
+}
+
+.persona--remembering {
+  animation: gentle-sway 3s ease-in-out infinite;
+}
+
+.persona--remembering .lottie-wrap {
+  filter: hue-rotate(20deg) saturate(1.2) brightness(1.05);
+}
+
+.persona--remembering .glow-ring {
+  opacity: 1;
+  border-color: #a29bfe;
+  box-shadow: 0 0 25px rgba(162, 155, 254, 0.35);
+  animation: pulse-glow 2.4s ease-in-out infinite;
+}
+
+.persona--remembering .memory-clouds { opacity: 1; }
+
+/* ── Viewfinder Overlay ───────────────────────────────── */
+
+.viewfinder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 160px;
+  height: 160px;
+  transform: translate(-50%, -55%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.vf-corner {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-color: #00b894;
+  border-style: solid;
+  border-width: 0;
+  animation: viewfinder-pulse 2s ease-in-out infinite;
+}
+
+.vf-tl { top: 0; left: 0; border-top-width: 2.5px; border-left-width: 2.5px; }
+.vf-tr { top: 0; right: 0; border-top-width: 2.5px; border-right-width: 2.5px; }
+.vf-bl { bottom: 0; left: 0; border-bottom-width: 2.5px; border-left-width: 2.5px; }
+.vf-br { bottom: 0; right: 0; border-bottom-width: 2.5px; border-right-width: 2.5px; }
+
+@keyframes viewfinder-pulse {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 1; }
+}
+
+.vf-scanline {
+  position: absolute;
+  left: 5%;
+  width: 90%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 184, 148, 0.7), transparent);
+  animation: scan-sweep 2.2s ease-in-out infinite;
+}
+
+@keyframes scan-sweep {
+  0%   { top: 5%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 95%; opacity: 0; }
+}
+
+/* ── Memory Clouds Overlay ────────────────────────────── */
+
+.memory-clouds {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 180px;
+  height: 60px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.mem-cloud {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(162, 155, 254, 0.25);
+  box-shadow:
+    15px 5px 0 rgba(162, 155, 254, 0.2),
+    -10px 3px 0 rgba(162, 155, 254, 0.15);
+  filter: blur(2px);
+}
+
+.mem-cloud-1 {
+  width: 50px; height: 22px;
+  top: 0; left: 20px;
+  animation: cloud-breathe 3s 0s ease-in-out infinite;
+}
+
+.mem-cloud-2 {
+  width: 40px; height: 18px;
+  top: 10px; left: 80px;
+  animation: cloud-breathe 3s 0.8s ease-in-out infinite;
+}
+
+.mem-cloud-3 {
+  width: 45px; height: 20px;
+  top: 25px; left: 50px;
+  animation: cloud-breathe 3s 1.6s ease-in-out infinite;
+}
+
+@keyframes cloud-breathe {
+  0%, 100% { transform: scale(1) translateY(0); opacity: 0.7; }
+  50%      { transform: scale(1.15) translateY(-4px); opacity: 1; }
+}
+
+/* ── Particle Shapes (CSS-drawn) ──────────────────────── */
+
+.particle--shape {
+  position: absolute;
+  left: var(--start-x, 0);
+  top: var(--start-y, 0);
+  animation: particle-float 1.8s ease-out forwards;
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
 /* Hide overlays in wrong states */
 .persona--sleeping .glow-ring { opacity: 0; }
 .persona--sleeping .thought-bubble { opacity: 0; }

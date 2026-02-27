@@ -232,11 +232,20 @@ class VoicePipeline:
                         if leftover:
                             session.write(leftover + " ")
                     if surface:
-                        state = (
-                            "searching"
-                            if event.tool_name == "WebSearch"
-                            else "thinking"
-                        )
+                        if event.tool_name == "WebSearch":
+                            state = "searching"
+                        elif event.tool_name in (
+                            "mcp__camera__camera_on",
+                            "mcp__camera__camera_off",
+                        ):
+                            state = "seeing"
+                        elif event.tool_name in (
+                            "mcp__memory__memory_store",
+                            "mcp__memory__memory_remove",
+                        ):
+                            state = "remembering"
+                        else:
+                            state = "thinking"
                         surface.set_state(state)
 
                 elif event.kind == "tool_result":
