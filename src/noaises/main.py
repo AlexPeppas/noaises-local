@@ -107,7 +107,6 @@ async def async_main(surface=None):
         settings.camera_device_index,
         settings.camera_frame_interval,
         settings.vision_model_name,
-        settings.vision_max_frames,
     )
 
     # Optionally pre-load vision model so camera_on is instant
@@ -154,6 +153,8 @@ async def async_main(surface=None):
                 frame_count = vision_pipeline.pending_frame_count
                 if frame_count > 0:
                     print(f"[vision] Processing {frame_count} frames...")
+                    if surface:
+                        surface.set_state("seeing")
                 description = await vision_pipeline.flush_and_describe()
                 if description:
                     print(f"[vision] Done: {description[:150]}[TRUNCATED]")
@@ -237,11 +238,20 @@ async def async_main(surface=None):
                             print(event.text, end="", flush=True)
                         elif event.kind == "tool_use":
                             if surface:
-                                state = (
-                                    "searching"
-                                    if event.tool_name == "WebSearch"
-                                    else "thinking"
-                                )
+                                if event.tool_name == "WebSearch":
+                                    state = "searching"
+                                elif event.tool_name in (
+                                    "mcp__camera__camera_on",
+                                    "mcp__camera__camera_off",
+                                ):
+                                    state = "seeing"
+                                elif event.tool_name in (
+                                    "mcp__memory__memory_store",
+                                    "mcp__memory__memory_remove",
+                                ):
+                                    state = "remembering"
+                                else:
+                                    state = "thinking"
                                 surface.set_state(state)
                         elif event.kind == "tool_result":
                             if surface and not first_token:

@@ -21,9 +21,8 @@ class Settings(BaseSettings):
     # Camera / Vision
     camera_device_index: int = Field(default=0)
     camera_frame_interval: float = Field(default=0.5)
-    vision_model_name: str = Field(default="Qwen/Qwen2-VL-2B-Instruct")
-    vision_max_frames: int = Field(default=6)
-    vision_preload: bool = Field(default=True)  # Pre-load vision model at startup (adds ~80s)
+    vision_model_name: str = Field(default="vikhyatk/moondream2")
+    vision_preload: bool = Field(default=True)
 
     @property
     def noaises_home_resolved(self) -> Path:
