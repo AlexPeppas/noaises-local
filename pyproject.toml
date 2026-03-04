@@ -22,10 +22,14 @@ dependencies = [
     "bitsandbytes>=0.43.0; sys_platform == 'linux'",
     "Pillow>=10.0.0",
     "qwen-vl-utils>=0.0.2",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "httpx>=0.25.0",
 ]
 
 [project.scripts]
 noaises = "noaises.main:main"
+noaises-proxy = "noaises.proxy.server:run_proxy"
 
 [build-system]
 requires = ["hatchling"]

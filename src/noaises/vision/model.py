@@ -123,7 +123,9 @@ class VisionModel:
             return_tensors="pt",
         ).to(self._model.device)
 
-        print(f"[vision] Preprocessing done in {time.perf_counter() - t0:.1f}s, generating...")
+        print(
+            f"[vision] Preprocessing done in {time.perf_counter() - t0:.1f}s, generating..."
+        )
 
         with torch.no_grad():
             generated_ids = self._model.generate(**inputs, max_new_tokens=150)
