@@ -67,6 +67,11 @@ def create_options(
 ) -> ClaudeAgentOptions:
     """Create agent options with a dynamic system prompt and optional MCP servers."""
     allowed = ALLOWED_TOOLS + (extra_allowed_tools or [])
+
+    env: dict[str, str] = {}
+    if settings.local_model_enabled:
+        env["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{settings.proxy_port}"
+
     return ClaudeAgentOptions(
         system_prompt=system_prompt,
         allowed_tools=allowed,
@@ -77,6 +82,7 @@ def create_options(
         setting_sources=["project"],
         cwd=settings.noaises_home_resolved,
         include_partial_messages=include_partial_messages,
+        env=env,
     )
 
 

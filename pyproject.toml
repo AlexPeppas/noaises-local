@@ -19,14 +19,19 @@ dependencies = [
     "torch>=2.0.0",
     "accelerate>=0.27.0",
     "Pillow>=10.0.0",
+    "qwen-vl-utils>=0.0.2",
     "einops>=0.7.0",
     "pyvips-binary>=1.0.0",
     "pyvips>=2.2.0",
     "tokenizers>=0.19.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "httpx>=0.25.0",
 ]
 
 [project.scripts]
 noaises = "noaises.main:main"
+noaises-proxy = "noaises.proxy.server:run_proxy"
 
 [build-system]
 requires = ["hatchling"]

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 import threading
 from pathlib import Path
 
@@ -118,7 +119,9 @@ async def async_main(surface=None):
         print("[vision] Vision model will load on first camera use (~80s).")
 
     # Initialize optional voice
+    global _voice_pipeline
     voice = _init_voice()
+    _voice_pipeline = voice
 
     turn_count = 0
 
@@ -354,8 +357,49 @@ def _run_async_loop(surface):
     asyncio.run(async_main(surface))
 
 
+# Module-level ref so the signal handler can reach the voice pipeline.
+_voice_pipeline = None
+_ctrl_c_count = 0
+
+
+def _sigint_handler(signum, frame):
+    """Handle Ctrl+C: first press signals graceful shutdown, second force-exits.
+
+    The voice pipeline's _shutdown event tells blocking sounddevice threads
+    to stop on their next loop iteration (~100ms). Without this, the threads
+    never learn about the interrupt because SIGINT only hits the main thread.
+    """
+    global _ctrl_c_count
+    _ctrl_c_count += 1
+
+    if _ctrl_c_count == 1:
+        print("\n[shutdown] Ctrl+C received, shutting down...")
+        if _voice_pipeline is not None:
+            _voice_pipeline.shutdown()
+        # Re-raise as KeyboardInterrupt so asyncio's loop/except can catch it
+        raise KeyboardInterrupt
+    else:
+        # Second Ctrl+C — force exit immediately
+        print("\n[shutdown] Force exit.")
+        os._exit(1)
+
+
 def main():
     load_dotenv(BASE_DIR / ".env")
+
+    # Install signal handler before anything else — ensures Ctrl+C always works,
+    # even when the main thread is blocked in pywebview or sounddevice threads
+    # are holding up the process.
+    signal.signal(signal.SIGINT, _sigint_handler)
+
+    # Route distillers (anthropic.AsyncAnthropic) through proxy when using local model
+    if settings.local_model_enabled:
+        os.environ["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{settings.proxy_port}"
+        print(
+            f"[local-model] Routing all API calls through proxy on :{settings.proxy_port}",
+            f"[local-model] Using :{settings.local_model_name}",
+            f"[local-model] Ollama base url :{settings.ollama_base_url}",
+        )
 
     surface = _init_surface()
 
@@ -373,7 +417,15 @@ def main():
             print("\nnoaises is going to sleep. Goodbye!")
             os._exit(0)
 
-        surface.run_blocking(on_closed=_on_window_closed)  # blocks main thread
+        try:
+            surface.run_blocking(on_closed=_on_window_closed)  # blocks main thread
+        except KeyboardInterrupt:
+            # Ctrl+C while pywebview is running — trigger clean shutdown
+            print("\n[shutdown] Closing surface...")
+            if _voice_pipeline is not None:
+                _voice_pipeline.shutdown()
+            surface.destroy()
+            os._exit(0)
     else:
         # No surface — asyncio gets the main thread
         asyncio.run(async_main())

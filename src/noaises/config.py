@@ -18,11 +18,19 @@ class Settings(BaseSettings):
     memory_distill_interval: int = Field(default=5)  # every N turns
     memory_distill_model: str = Field(default="claude-haiku-4-5-20251001")
 
+    # Local model proxy
+    local_model_enabled: bool = Field(default=False)
+    local_model_name: str = Field(default="qwen2.5:14b")
+    proxy_port: int = Field(default=8082)
+    ollama_base_url: str = Field(default="http://localhost:11434")
+
     # Camera / Vision
     camera_device_index: int = Field(default=0)
     camera_frame_interval: float = Field(default=0.5)
-    vision_model_name: str = Field(default="vikhyatk/moondream2")
-    vision_preload: bool = Field(default=True)
+
+    vision_model_name: str = Field(default="vikhyatk/moondream2") # Field(default="Qwen/Qwen2-VL-2B-Instruct")
+    vision_preload: bool = Field(default=False)
+    vision_max_frames: int = Field(default=6)
 
     @property
     def noaises_home_resolved(self) -> Path:
